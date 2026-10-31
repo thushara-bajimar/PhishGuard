@@ -1,10 +1,13 @@
 # PhishGuard — Explainable AI-Powered Phishing Detection
 
-PhishGuard is a full-stack security analysis application. This initial milestone establishes the React/Vite frontend, FastAPI service, and their REST connection. **Phishing analysis, machine-learning predictions, SQLite persistence, and scan-history features are not implemented yet.** The current page makes no detection claims or predictions.
+PhishGuard is a full-stack security analysis application. The frontend now includes the dashboard shell, URL/message scanners, typed analysis-result presentation, scan history, and phishing education views. **The backend currently exposes only its health endpoint; analysis, machine-learning predictions, SQLite persistence, and scan-history endpoints are not implemented yet.** Until those endpoints are available, the UI shows explicit empty/error states rather than fabricated predictions or scan records.
 
 ## Project layout
 
 - `frontend/` — React, TypeScript, Vite, and Tailwind CSS
+- `frontend/src/components/` — reusable shell, scan table, analysis results, icons, and details dialog
+- `frontend/src/pages/` — dashboard, URL/message scanner, history, and education views
+- `frontend/src/api.ts` — typed REST client; endpoints other than health are planned contracts and will report API errors until implemented
 - `backend/app/` — FastAPI application (health endpoint only at this stage)
 - `requirements.txt` — Python dependencies
 
@@ -53,7 +56,19 @@ The API is available at `http://127.0.0.1:8000`; interactive API documentation i
 npm run dev
 ```
 
-Open the printed Vite URL (normally `http://127.0.0.1:5173`) and select **Test API connection**. It calls `GET /api/health`. This health endpoint only verifies service availability; it does not analyze messages or URLs.
+Open the printed Vite URL (normally `http://127.0.0.1:5173`). The sidebar checks `GET /api/health` and displays the API connection status. This health endpoint only verifies service availability; it does not analyze messages or URLs.
+
+## Frontend API contract expected by the UI
+
+The frontend is wired to these REST routes, which the backend does not implement yet:
+
+- `POST /api/scans/url` with `{ "url": "..." }`
+- `POST /api/scans/message` with `{ "content": "..." }`
+- `GET /api/scans` for prior scan records (a list or `{ "items": [], "total": 0 }`)
+- `GET /api/scans/{id}` for full result details
+- `DELETE /api/scans/{id}` for deleting a stored record
+
+Analysis responses should include `id`, `scan_type`, `created_at`, `risk_score` (0–100), `risk_category` (`low`, `medium`, `high`, or `critical`), `prediction` (`potential_phishing` or `no_phishing_detected`), `indicators` (each with `name`, `description`, and `source` of `model` or `heuristic`), and a `disclaimer`. `model_name` and `model_confidence` are optional. History items use the scan-record fields. The UI distinguishes model indicators from heuristic signals and treats API predictions as assessments—not guarantees.
 
 ## Frontend production build
 
