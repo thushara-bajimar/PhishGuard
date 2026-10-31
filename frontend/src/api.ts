@@ -16,6 +16,15 @@ export interface AnalysisIndicator {
   source: IndicatorSource
 }
 
+export interface ModelInfo {
+  algorithm: string
+  dataset_source: string | null
+  dataset_source_url: string | null
+  sklearn_version: string | null
+  feature_schema_version: number
+  risk_score_note: string
+}
+
 export interface ScanRecord {
   id: string | number
   scan_type: ScanType
@@ -30,7 +39,10 @@ export interface AnalysisResult extends ScanRecord {
   indicators: AnalysisIndicator[]
   disclaimer: string
   model_name?: string
+  model_version?: string
   model_confidence?: number
+  model_info?: ModelInfo
+  explanation_note?: string
 }
 
 export interface ScanHistoryResponse {
@@ -80,7 +92,7 @@ export function getApiHealth(): Promise<HealthResponse> {
 }
 
 export function analyzeUrl(url: string): Promise<AnalysisResult> {
-  return request<AnalysisResult>('/api/scans/url', {
+  return request<AnalysisResult>('/api/analyze/url', {
     method: 'POST',
     body: JSON.stringify({ url }),
   })

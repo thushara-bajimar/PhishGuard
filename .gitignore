@@ -8,6 +8,9 @@ venv/
 *.sqlite
 *.sqlite3
 *.tsbuildinfo
+data/
+backend/models/*.joblib
+backend/models/*.metrics.json
 
 # Node / frontend
 node_modules/
