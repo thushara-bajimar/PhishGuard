@@ -78,6 +78,15 @@ def test_message_request_validation_and_prediction_schema(client: TestClient, mo
     assert payload.indicators[0].source == "heuristic"
 
 
+def test_invalid_message_errors_do_not_echo_submitted_text(client: TestClient) -> None:
+    secret_text = "sensitive-" + ("x" * 30_001)
+    response = client.post("/api/analyze/message", json={"content": secret_text})
+
+    assert response.status_code == 422
+    assert secret_text not in response.text
+    assert "30000" in response.text
+
+
 def test_history_stats_details_and_delete(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(api.url_prediction_service, "analyze", lambda _: prediction_result("url", "url-1"))
     monkeypatch.setattr(api.message_prediction_service, "analyze", lambda _: prediction_result("message", "message-1"))

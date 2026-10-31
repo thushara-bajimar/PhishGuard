@@ -66,3 +66,10 @@ def test_message_redacts_emails_phones_secrets_and_url_queries() -> None:
     assert "555 123 4567" not in redacted
     assert "secret" not in redacted
     assert "xyz" not in redacted
+
+
+def test_message_redacts_scheme_less_and_www_link_query_values() -> None:
+    redacted = redact_message("Visit www.example.com/reset?token=private or example.org?token=othersecret")
+
+    assert "private" not in redacted
+    assert "othersecret" not in redacted

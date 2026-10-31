@@ -7,7 +7,6 @@ import os
 import re
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -16,13 +15,14 @@ DEFAULT_DATABASE_PATH = Path(__file__).resolve().parents[2] / "data" / "phishgua
 EMAIL_PATTERN = re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")
 PHONE_PATTERN = re.compile(r"(?<!\w)(?:\+?\d[\d(). -]{7,}\d)(?!\w)")
 SECRET_PATTERN = re.compile(r"(?i)\b(password|passcode|token|api[_ -]?key|secret)\s*[:=]\s*([^\s,;]+)")
-URL_PATTERN = re.compile(r"(?i)https?://[^\s<>\"']+")
+URL_PATTERN = re.compile(r"(?i)\b(?:https?://|www\.)[^\s<>\"']+|\b(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}(?::\d+)?(?:[/?#][^\s<>\"']*)?")
 
 
 def redact_url(url: str) -> str:
     """Remove URL credentials and redact query values before persistence."""
     try:
-        parsed = urlsplit(url)
+        value = url.strip()
+        parsed = urlsplit(value if "://" in value or value.startswith("//") else f"//{value}")
         host = parsed.hostname or ""
         if ":" in host and not host.startswith("["):
             host = f"[{host}]"
@@ -102,6 +102,7 @@ class ScanStore:
         scan_type = result["scan_type"]
         redacted = redact_url(submitted_input) if scan_type == "url" else redact_message(submitted_input)
         result = {**result, "input_excerpt": redacted[:180]}
+        stored_result = {key: value for key, value in result.items() if key not in {"indicators", "input_excerpt"}}
         with self._connection() as connection:
             connection.execute(
                 """INSERT INTO scans
@@ -110,7 +111,7 @@ class ScanStore:
                 (
                     result["id"], scan_type, redacted, result["prediction"], result["risk_score"],
                     result["risk_category"], json.dumps(result["indicators"], ensure_ascii=False),
-                    json.dumps(result, ensure_ascii=False), result["created_at"],
+                    json.dumps(stored_result, ensure_ascii=False), result["created_at"],
                 ),
             )
         return result
@@ -131,6 +132,7 @@ class ScanStore:
             return None
         result = json.loads(row["result_json"])
         result["input_excerpt"] = row["input_redacted"][:180]
+        result["indicators"] = json.loads(row["indicators_json"])
         return result
 
     def delete(self, scan_id: str) -> bool:
@@ -157,7 +159,3 @@ class ScanStore:
             "message_scans": int(row["message_scans"] or 0),
             "last_scan_at": row["last_scan_at"],
         }
-
-
-def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()

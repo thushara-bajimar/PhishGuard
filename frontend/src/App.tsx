@@ -29,10 +29,12 @@ function App() {
       setHistoryOffset(history.offset)
       setTotal(history.total)
       setStats(statistics)
+      setApiOnline(true)
     } catch (reason) {
       setHistoryError(reason instanceof ApiError ? reason.message : 'Could not load scan history.')
       setTotal(null)
       setStats(null)
+      setApiOnline(reason instanceof ApiError && reason.status !== undefined)
     } finally {
       setHistoryLoading(false)
     }
@@ -64,7 +66,7 @@ function App() {
   if (page === 'overview') {
     content = <Dashboard scans={scans} total={total} stats={stats} loading={historyLoading} error={historyError} onRefresh={() => { void refreshHistory(0) }} onNavigate={setPage} onView={setSelectedScan} />
   } else if (page === 'url' || page === 'message') {
-    content = <ScannerPage key={page} type={page} onScanComplete={() => { void refreshHistory(0) }} />
+    content = <ScannerPage key={page} type={page} onApiStatus={setApiOnline} onScanComplete={() => { void refreshHistory(0) }} />
   } else if (page === 'history') {
     content = <HistoryPage scans={scans} total={total ?? 0} offset={historyOffset} pageSize={25} loading={historyLoading} error={historyError} onRefresh={() => { void refreshHistory(historyOffset) }} onPageChange={(offset) => { void refreshHistory(offset) }} onView={setSelectedScan} onDelete={(scan) => { void removeScan(scan) }} deletingId={deletingId} />
   } else {

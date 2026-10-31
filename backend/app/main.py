@@ -3,6 +3,7 @@ import sqlite3
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Query, Request, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -53,6 +54,16 @@ app.add_middleware(
 async def unexpected_error_handler(_: Request, __: Exception) -> JSONResponse:
     """Never return implementation details or submitted content to API clients."""
     return JSONResponse(status_code=500, content={"detail": "An unexpected server error occurred."})
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_error_handler(_: Request, error: RequestValidationError) -> JSONResponse:
+    """Return validation messages without echoing submitted values into responses or logs."""
+    details = [
+        {"loc": item.get("loc", ()), "msg": item.get("msg", "Invalid input."), "type": item.get("type", "value_error")}
+        for item in error.errors()
+    ]
+    return JSONResponse(status_code=422, content={"detail": details})
 
 
 @app.get("/api/health", tags=["system"])

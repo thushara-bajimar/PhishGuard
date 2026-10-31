@@ -1,4 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap');
 @import "tailwindcss";
 
 :root{font-family:'DM Sans',sans-serif;color:#e8eef8;background:#080f1c;font-synthesis:none;text-rendering:optimizeLegibility;-webkit-font-smoothing:antialiased;font-optical-sizing:auto;font-weight:400;font-size:14px;font-feature-settings:"ss01" on;color-scheme:dark;--bg:#080f1c;--panel:#101a2a;--panel2:#121f31;--border:#202d40;--muted:#8493a8;--text:#e8eef8;--blue:#6ca7ff;--cyan:#73d4c3;--red:#f07883;--amber:#e3b45e;--green:#73d4a0}
@@ -17,3 +16,4 @@
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
 .model-score-note,.indicator-explanation{margin:7px 0 0;color:#7f90a5;font-size:9px;line-height:1.55}.indicator-explanation{max-width:620px}
 .history-pagination{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;border-top:1px solid #223146;color:#8494a9;font-size:9px}.history-pagination>div{display:flex;gap:7px}
+@media(max-width:760px){.sidebar{visibility:hidden}.sidebar-open{visibility:visible}}
