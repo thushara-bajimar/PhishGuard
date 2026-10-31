@@ -83,7 +83,7 @@ class AnalysisResponse(BaseModel):
     model_confidence: float = Field(ge=0.0, le=1.0, description="Uncalibrated predicted-class score, not a real-world probability.")
     model_info: ModelInfoResponse
     explanation_note: str
-    input_excerpt: str | None = None
+    input_excerpt: str
 
 
 class ScanRecordResponse(BaseModel):

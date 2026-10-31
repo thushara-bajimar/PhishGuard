@@ -127,7 +127,7 @@ From the `backend/` directory:
 
 ```powershell
 ..\.venv\Scripts\python.exe -m pip install -r ..\requirements-dev.txt
-..\.venv\Scripts\python.exe -m unittest discover -s tests -v
+..\.venv\Scripts\python.exe -m pytest -q
 ```
 
 ## Frontend production build

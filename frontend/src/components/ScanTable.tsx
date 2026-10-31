@@ -1,7 +1,7 @@
 import type { ScanRecord } from '../api'
 import { Icon } from './Icons'
 
-export function ScanTable({ scans, onView, onDelete, deletingId, compact = false }: { scans: ScanRecord[]; onView: (scan: ScanRecord) => void; onDelete?: (scan: ScanRecord) => void; deletingId?: string | number | null; compact?: boolean }) {
+export function ScanTable({ scans, onView, onDelete, deletingId, compact = false }: { scans: ScanRecord[]; onView: (scan: ScanRecord) => void; onDelete?: (scan: ScanRecord) => void; deletingId?: string | null; compact?: boolean }) {
   return <div className={`table-wrap ${compact ? 'table-compact' : ''}`}><table className="scan-table"><thead><tr><th>SCAN</th><th>TYPE</th><th>DATE</th><th>RESULT</th><th>RISK SCORE</th><th aria-label="Actions" /></tr></thead><tbody>
     {scans.map((scan) => <tr key={scan.id}>
       <td><button className="scan-name" onClick={() => onView(scan)}><span className={`scan-type-icon type-${scan.scan_type}`}>{scan.scan_type === 'url' ? <Icon name="link" size={15} /> : <Icon name="mail" size={15} />}</span><span>{scan.input_excerpt || (scan.scan_type === 'url' ? 'URL analysis' : 'Message analysis')}</span></button></td>

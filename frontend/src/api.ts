@@ -28,30 +28,30 @@ export interface ModelInfo {
 }
 
 export interface ScanRecord {
-  id: string | number
+  id: string
   scan_type: ScanType
   created_at: string
   risk_score: number
   risk_category: RiskCategory
   prediction: Prediction
-  input_excerpt?: string
+  input_excerpt: string
 }
 
 export interface AnalysisResult extends ScanRecord {
   indicators: AnalysisIndicator[]
   disclaimer: string
-  model_name?: string
-  model_version?: string
-  model_confidence?: number
-  model_info?: ModelInfo
-  explanation_note?: string
+  model_name: string
+  model_version: string
+  model_confidence: number
+  model_info: ModelInfo
+  explanation_note: string
 }
 
 export interface ScanHistoryResponse {
   items: ScanRecord[]
-  total?: number
-  limit?: number
-  offset?: number
+  total: number
+  limit: number
+  offset: number
 }
 
 export interface ScanStatistics {
@@ -88,8 +88,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!response.ok) {
     let detail = `API request failed (HTTP ${response.status}).`
     try {
-      const body = await response.json() as { detail?: string }
-      if (body.detail) detail = body.detail
+      const body = await response.json() as { detail?: unknown }
+      if (typeof body.detail === 'string') {
+        detail = body.detail
+      } else if (Array.isArray(body.detail)) {
+        const messages = body.detail.flatMap((item: unknown) => {
+          if (typeof item === 'object' && item !== null && 'msg' in item && typeof item.msg === 'string') return [item.msg]
+          return []
+        })
+        if (messages.length) detail = messages.join(' ')
+      }
     } catch {
       // Use the status message when the server response is not JSON.
     }
@@ -118,15 +126,15 @@ export function analyzeMessage(content: string): Promise<AnalysisResult> {
   })
 }
 
-export async function getScanHistory(): Promise<ScanHistoryResponse> {
-  return request<ScanHistoryResponse>('/api/history?limit=100')
+export async function getScanHistory(limit = 25, offset = 0): Promise<ScanHistoryResponse> {
+  return request<ScanHistoryResponse>(`/api/history?limit=${limit}&offset=${offset}`)
 }
 
-export function getScanDetails(id: string | number): Promise<AnalysisResult> {
+export function getScanDetails(id: string): Promise<AnalysisResult> {
   return request<AnalysisResult>(`/api/history/${encodeURIComponent(String(id))}`)
 }
 
-export function deleteScan(id: string | number): Promise<void> {
+export function deleteScan(id: string): Promise<void> {
   return request<void>(`/api/history/${encodeURIComponent(String(id))}`, { method: 'DELETE' })
 }
 
