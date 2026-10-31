@@ -60,7 +60,7 @@ export function AppShell({ page, onNavigate, children, apiOnline }: { page: Page
         <div className="breadcrumb"><span>Workspace</span><Icon name="chevron" size={14} /><strong>{navigation.find((item) => item.id === page)?.label}</strong></div>
         <div className="topbar-right"><span className="secure-label"><span className="secure-dot" /> LOCAL WORKSPACE</span><div className="avatar" aria-label="PhishGuard workspace">PG</div></div>
       </header>
-      <main className="page-content">{children}</main>
+      <main id="main-content" className="page-content">{children}</main>
       <footer className="main-footer"><span>PhishGuard <i>·</i> Explainable security analysis</span><span>Predictions are informational, not guarantees of safety.</span></footer>
     </div>
   </div>
