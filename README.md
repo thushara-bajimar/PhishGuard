@@ -1,6 +1,6 @@
 # PhishGuard — Explainable AI-Powered Phishing Detection
 
-PhishGuard is a full-stack security analysis application. The frontend includes the dashboard shell, URL/message scanners, typed analysis-result presentation, scan history, and phishing education views. The backend now has a real Scikit-learn URL model training/inference pipeline and `POST /api/analyze/url`. A trained artifact is deliberately not included: supply a labeled CSV and train it locally. Message analysis, SQLite persistence, and scan-history endpoints remain future work.
+PhishGuard is a full-stack security analysis application. The backend includes independently trainable Scikit-learn URL and message models, SQLite scan history, dashboard statistics, and REST endpoints. Dataset files and trained artifacts are not included; provide the documented public datasets and train each model locally. Analysis routes return HTTP 503 until the corresponding trained artifact is present.
 
 ## Project layout
 
@@ -8,9 +8,10 @@ PhishGuard is a full-stack security analysis application. The frontend includes 
 - `frontend/src/components/` — reusable shell, scan table, analysis results, icons, and details dialog
 - `frontend/src/pages/` — dashboard, URL/message scanner, history, and education views
 - `frontend/src/api.ts` — typed REST client for health, URL analysis, message analysis, and scan history
-- `backend/app/ml/` — deterministic URL features, CSV-based model training/evaluation, and prediction service
-- `backend/app/main.py` — FastAPI health and URL analysis endpoints
-- `backend/tests/` — URL feature and request-validation tests
+- `backend/app/ml/` — URL features and URL/message training, evaluation, and inference services
+- `backend/app/services/scan_store.py` — SQLite persistence and best-effort input redaction
+- `backend/app/main.py` — FastAPI analysis, history, stats, and health endpoints
+- `backend/tests/` — model, API, input validation, and persistence tests
 - `requirements.txt` — Python dependencies
 
 ## Prerequisites
@@ -90,22 +91,42 @@ To test after training, start the API from the project root and run this in anot
 Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/api/analyze/url -ContentType 'application/json' -Body '{"url":"https://example.com/"}' | ConvertTo-Json -Depth 8
 ```
 
-## Remaining frontend API routes
+## Message dataset and model training
 
-The UI is also wired for routes that are not implemented yet:
+For message classification, this project documents the Kaggle dataset [Phishing Email Detection](https://www.kaggle.com/datasets/subhajournal/phishingemails), file `Phishing_Email.csv`. Kaggle’s dataset card describes two semantic fields: **`Email Text`** (email body text) and **`Email Type`** (message class), and lists an LGPL-3.0 license. The download may also contain an index/extra column; it is ignored. Training requires the two named columns and binary labels, with **`Phishing Email`** as the default positive label; inspect your CSV and choose the exact phishing label if values differ. Respect the source license and Kaggle download terms. This is email data and is not representative evidence for SMS model quality.
 
-- `POST /api/scans/message` with `{ "content": "..." }`
-- `GET /api/scans` for prior scan records (a list or `{ "items": [], "total": 0 }`)
-- `GET /api/scans/{id}` for full result details
-- `DELETE /api/scans/{id}` for deleting a stored record
+Download the CSV from Kaggle and place it at `data/Phishing_Email.csv`. No dataset is downloaded automatically. Train from the `backend/` directory:
 
-When implemented, analysis responses should include `id`, `scan_type`, `created_at`, `risk_score` (0–100), `risk_category` (`low`, `medium`, `high`, or `critical`), `prediction` (`potential_phishing` or `no_phishing_detected`), `indicators` (each with `name`, `description`, and `source` of `model` or `heuristic`), and a `disclaimer`. The UI distinguishes model predictions from heuristic signals and never treats results as guarantees.
+```powershell
+..\.venv\Scripts\python.exe -m app.ml.message_train --data ..\data\Phishing_Email.csv --text-column "Email Text" --label-column "Email Type" --phishing-label "Phishing Email"
+```
+
+The pipeline uses lowercased, Unicode-normalized word TF-IDF with unigram/bigram features, followed by class-weighted Logistic Regression. Exact normalized duplicate messages are deduplicated and grouped so duplicate text cannot cross the stratified train/test split. Training prints phishing-class precision, recall, F1, and a confusion matrix, and saves the real fitted pipeline and metadata to `backend/models/message_phishing_model.joblib` with metrics in the sibling `.metrics.json` file. Vectorizer vocabulary and classifier weights are fitted only on the training partition.
+
+The dataset is email-only and may be stale, noisy, duplicated, or unrepresentative of current campaigns, languages, and SMS. Dataset-derived metrics do not establish deployment performance. Logistic Regression outputs are not calibrated; risk score and model confidence are scores, not reliable real-world probabilities. The separately displayed message indicators (urgency, credential/account requests, threatening language, payment terms, and link-like strings) are rule-based observations—not model explanations. Included links are never visited or resolved.
+
+## SQLite, privacy, and remaining endpoints
+
+On startup, the API creates `data/phishguard.sqlite3` (override its path with `PHISHGUARD_DATABASE_PATH`). Successful URL and message scans are persisted with their result and an input copy redacted for storage. Message redaction masks common email addresses, phone numbers, credential assignments, and URL query values; URL query values are all masked. Redaction is best-effort, not a guarantee of anonymization. Avoid submitting unnecessary personal or secret information and protect the local database file. Request bodies are not logged by application code.
+
+Implemented REST endpoints:
+
+- `POST /api/analyze/url` — URL model analysis; never performs DNS or HTTP requests to the submitted URL.
+- `POST /api/analyze/message` — email/SMS text analysis; never opens links in the message.
+- `GET /api/history?limit=50&offset=0` — paginated redacted scan list.
+- `GET /api/history/{scan_id}` — saved result details (redacted excerpt only, not the full submitted text).
+- `DELETE /api/history/{scan_id}` — delete a scan; returns 204 or 404.
+- `GET /api/stats` — total, phishing, suspicious, and scan-type counts.
+- `GET /api/health` — service availability only; it does not assert that either model is trained.
+
+Message request shape is `{ "content": "..." }`, limited to 30,000 characters. URL requests are limited to 4,096 characters and HTTP(S) or bare hostnames. CORS allows the two local Vite origins by default; set `PHISHGUARD_CORS_ORIGINS` to a comma-separated allowlist when needed. API errors use clear 4xx/5xx JSON details; unexpected errors return a generic message, not a stack trace.
 
 ## Run tests
 
 From the `backend/` directory:
 
 ```powershell
+..\.venv\Scripts\python.exe -m pip install -r ..\requirements-dev.txt
 ..\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
@@ -119,9 +140,8 @@ npm run build
 
 ## Next implementation milestones
 
-1. Add message/SMS analysis with its own appropriately sourced dataset and trained model.
-2. Add SQLite persistence, history endpoints, and dashboard aggregates.
-3. Expand evaluation with temporal/external validation and model calibration if risk scores are intended to approximate probabilities.
-4. Add persistence and end-to-end API tests.
+1. Train both models with downloaded datasets and review held-out metrics.
+2. Expand evaluation with temporal/external validation and model calibration if risk scores are intended to approximate probabilities.
+3. Consider a separate, suitable SMS dataset before representing text-model quality as SMS-specific.
 
 Model output and heuristic indicators must remain distinct in the API and UI. A prediction must never be presented as a guarantee that a URL or message is safe.

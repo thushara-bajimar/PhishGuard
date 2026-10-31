@@ -41,12 +41,15 @@ class URLRequestValidationTests(unittest.TestCase):
         self.assertEqual(AnalyzeURLRequest(url=" https://example.com/path ").url, "https://example.com/path")
         self.assertEqual(AnalyzeURLRequest(url="example.com").url, "example.com")
         self.assertEqual(AnalyzeURLRequest(url="http://[::1]:8080/path").url, "http://[::1]:8080/path")
+        self.assertEqual(AnalyzeURLRequest(url="http://localhost:8000/health").url, "http://localhost:8000/health")
 
     def test_rejects_non_http_scheme_and_invalid_port(self) -> None:
         with self.assertRaises(ValueError):
             AnalyzeURLRequest(url="ftp://example.com/file")
         with self.assertRaises(ValueError):
             AnalyzeURLRequest(url="https://example.com:bad/path")
+        with self.assertRaises(ValueError):
+            AnalyzeURLRequest(url="https://not a host/path")
 
 
 if __name__ == "__main__":

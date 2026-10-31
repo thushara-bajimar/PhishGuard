@@ -25,7 +25,7 @@ from app.ml.url_features import FEATURE_NAMES, URLFeatureTransformer
 DEFAULT_MODEL_PATH = Path(__file__).resolve().parents[2] / "models" / "url_phishing_model.joblib"
 DATASET_SOURCE = "UCI Machine Learning Repository: PhiUSIIL Phishing URL (Website), dataset 967"
 DATASET_SOURCE_URL = "https://archive.ics.uci.edu/dataset/967/phiusiil+phishing+url+dataset"
-_DOMAIN_EXTRACTOR = tldextract.TLDExtract(suffix_list_urls=())
+_DOMAIN_EXTRACTOR = tldextract.TLDExtract(cache_dir=False, suffix_list_urls=())
 
 
 def _host_group(url: str) -> str:

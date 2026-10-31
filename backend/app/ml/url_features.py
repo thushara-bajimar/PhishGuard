@@ -10,7 +10,7 @@ import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 import tldextract
 
-_DOMAIN_EXTRACTOR = tldextract.TLDExtract(suffix_list_urls=())
+_DOMAIN_EXTRACTOR = tldextract.TLDExtract(cache_dir=False, suffix_list_urls=())
 
 FEATURE_NAMES = (
     "url_length",

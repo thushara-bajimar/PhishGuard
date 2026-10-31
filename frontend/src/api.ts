@@ -21,8 +21,10 @@ export interface ModelInfo {
   dataset_source: string | null
   dataset_source_url: string | null
   sklearn_version: string | null
+  tldextract_version?: string | null
   feature_schema_version: number
   risk_score_note: string
+  scope_note?: string | null
 }
 
 export interface ScanRecord {
@@ -48,6 +50,17 @@ export interface AnalysisResult extends ScanRecord {
 export interface ScanHistoryResponse {
   items: ScanRecord[]
   total?: number
+  limit?: number
+  offset?: number
+}
+
+export interface ScanStatistics {
+  total_scans: number
+  phishing_detections: number
+  suspicious_results: number
+  url_scans: number
+  message_scans: number
+  last_scan_at: string | null
 }
 
 export class ApiError extends Error {
@@ -99,21 +112,24 @@ export function analyzeUrl(url: string): Promise<AnalysisResult> {
 }
 
 export function analyzeMessage(content: string): Promise<AnalysisResult> {
-  return request<AnalysisResult>('/api/scans/message', {
+  return request<AnalysisResult>('/api/analyze/message', {
     method: 'POST',
     body: JSON.stringify({ content }),
   })
 }
 
 export async function getScanHistory(): Promise<ScanHistoryResponse> {
-  const response = await request<ScanRecord[] | ScanHistoryResponse>('/api/scans')
-  return Array.isArray(response) ? { items: response, total: response.length } : response
+  return request<ScanHistoryResponse>('/api/history?limit=100')
 }
 
 export function getScanDetails(id: string | number): Promise<AnalysisResult> {
-  return request<AnalysisResult>(`/api/scans/${encodeURIComponent(String(id))}`)
+  return request<AnalysisResult>(`/api/history/${encodeURIComponent(String(id))}`)
 }
 
 export function deleteScan(id: string | number): Promise<void> {
-  return request<void>(`/api/scans/${encodeURIComponent(String(id))}`, { method: 'DELETE' })
+  return request<void>(`/api/history/${encodeURIComponent(String(id))}`, { method: 'DELETE' })
+}
+
+export function getScanStatistics(): Promise<ScanStatistics> {
+  return request<ScanStatistics>('/api/stats')
 }
