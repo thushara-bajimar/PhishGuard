@@ -1,0 +1,133 @@
+{
+  "model_name": "PhishGuard URL Random Forest",
+  "algorithm": "RandomForestClassifier",
+  "random_state": 42,
+  "input_scope": "hostname",
+  "dataset_source": "UCI Machine Learning Repository: PhiUSIIL Phishing URL (Website), dataset 967",
+  "dataset_source_url": "https://archive.ics.uci.edu/dataset/967/phiusiil+phishing+url+dataset",
+  "dataset_sha256": "a236549cd369cd80bd478ff8e1779cbf44c58d5c3f79f7a51a1adbed7d06d1c6",
+  "url_column": "URL",
+  "label_column": "label",
+  "phishing_label_value": "0",
+  "label_mapping": {
+    "legitimate": 0,
+    "phishing": 1
+  },
+  "feature_schema_version": 3,
+  "feature_names": [
+    "url_length",
+    "hostname_length",
+    "hostname_dot_count",
+    "subdomain_count",
+    "path_length",
+    "path_segment_count",
+    "query_length",
+    "query_parameter_count",
+    "fragment_present",
+    "https_present",
+    "ip_address_host",
+    "host_has_punycode",
+    "suspicious_character_count",
+    "at_sign_count",
+    "hyphen_count",
+    "host_hyphen_count",
+    "digit_count",
+    "digit_ratio",
+    "host_digit_ratio",
+    "suspicious_keyword_count",
+    "shortener_host",
+    "nonstandard_port",
+    "userinfo_present"
+  ],
+  "sklearn_version": "1.9.1",
+  "tldextract_version": "5.4.0",
+  "trained_at_utc": "2026-11-15T09:25:15.912030+00:00",
+  "rows": {
+    "rows_read": 235795,
+    "rows_skipped": {
+      "url_too_long": 4
+    },
+    "rows_skipped_total": 4,
+    "duplicate_rows_removed": 1823,
+    "conflicting_label_rows_dropped": 2,
+    "unique_rows": 233966,
+    "class_counts": {
+      "legitimate": 134849,
+      "phishing": 99117
+    },
+    "input_scope_duplicate_rows_removed": 14774,
+    "input_scope_conflicting_rows_dropped": 157,
+    "rows_used_for_training_and_evaluation": 219035
+  },
+  "split": "StratifiedGroupKFold(n_splits=5) first fold, grouped by registered domain (80/20 holdout)",
+  "train_rows": 175229,
+  "test_rows": 43806,
+  "train_host_groups": 140365,
+  "test_host_groups": 35086,
+  "host_overlap": 0,
+  "phishing_probability_mean_test": 0.4505419071729072,
+  "accuracy": 0.8216454366981693,
+  "precision_phishing": 0.8655231005744801,
+  "recall_phishing": 0.6349121557454891,
+  "f1_phishing": 0.7324956346081419,
+  "confusion_matrix_labels": [
+    "legitimate",
+    "phishing"
+  ],
+  "confusion_matrix": [
+    [
+      25296,
+      1662
+    ],
+    [
+      6151,
+      10697
+    ]
+  ],
+  "feature_importances": {
+    "subdomain_count": 0.3673,
+    "hostname_dot_count": 0.13686,
+    "url_length": 0.09116,
+    "host_digit_ratio": 0.08944,
+    "hostname_length": 0.08619,
+    "digit_count": 0.08159,
+    "digit_ratio": 0.07986,
+    "hyphen_count": 0.02911,
+    "host_hyphen_count": 0.02666,
+    "suspicious_keyword_count": 0.01071,
+    "ip_address_host": 0.00053,
+    "host_has_punycode": 0.00046,
+    "shortener_host": 0.00013,
+    "path_length": 0.0,
+    "path_segment_count": 0.0,
+    "query_length": 0.0,
+    "query_parameter_count": 0.0,
+    "fragment_present": 0.0,
+    "https_present": 0.0,
+    "suspicious_character_count": 0.0,
+    "at_sign_count": 0.0,
+    "nonstandard_port": 0.0,
+    "userinfo_present": 0.0
+  },
+  "shortcut_diagnostics": {
+    "class_trait_rates": {
+      "https_scheme": {
+        "legitimate": 1.0,
+        "phishing": 0.4472
+      },
+      "www_prefix": {
+        "legitimate": 1.0,
+        "phishing": 0.4686
+      },
+      "non_empty_path": {
+        "legitimate": 0.0,
+        "phishing": 0.1715
+      }
+    },
+    "shortcut_only_baseline": {
+      "description": "Depth-3 decision tree on (https scheme, www prefix, non-empty path) only, same split.",
+      "accuracy": 0.996667123225129,
+      "f1_phishing": 0.9956482861400894
+    }
+  }
+}

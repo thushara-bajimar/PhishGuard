@@ -1,0 +1,86 @@
+{
+  "description": "URL model trained on UCI PhiUSIIL with each input scope; identical RandomForest, random_state=42, StratifiedGroupKFold first fold grouped by registered domain. Produced by app.ml.train on 2026-11-15. Only the hostname model is shipped.",
+  "scopes": {
+    "url": {
+      "shipped": false,
+      "rows_used": 233966,
+      "test_rows": 46793,
+      "accuracy": 0.9981,
+      "precision_phishing": 0.9995,
+      "recall_phishing": 0.9959,
+      "f1_phishing": 0.9977,
+      "confusion_matrix": [
+        [
+          26961,
+          9
+        ],
+        [
+          82,
+          19741
+        ]
+      ],
+      "top_features": {
+        "https_present": 0.40695,
+        "path_length": 0.19774,
+        "subdomain_count": 0.10611,
+        "digit_count": 0.05738,
+        "url_length": 0.05414
+      },
+      "shortcut_only_baseline_accuracy": 0.9955
+    },
+    "hostname": {
+      "shipped": true,
+      "rows_used": 219035,
+      "test_rows": 43806,
+      "accuracy": 0.8216,
+      "precision_phishing": 0.8655,
+      "recall_phishing": 0.6349,
+      "f1_phishing": 0.7325,
+      "confusion_matrix": [
+        [
+          25296,
+          1662
+        ],
+        [
+          6151,
+          10697
+        ]
+      ],
+      "top_features": {
+        "subdomain_count": 0.3673,
+        "hostname_dot_count": 0.13686,
+        "url_length": 0.09116,
+        "host_digit_ratio": 0.08944,
+        "hostname_length": 0.08619
+      },
+      "shortcut_only_baseline_accuracy": 0.9967
+    },
+    "registered_domain": {
+      "shipped": false,
+      "rows_used": 175389,
+      "test_rows": 35078,
+      "accuracy": 0.6614,
+      "precision_phishing": 0.3691,
+      "recall_phishing": 0.5199,
+      "f1_phishing": 0.4317,
+      "confusion_matrix": [
+        [
+          18687,
+          7712
+        ],
+        [
+          4167,
+          4512
+        ]
+      ],
+      "top_features": {
+        "host_digit_ratio": 0.1558,
+        "hostname_dot_count": 0.15529,
+        "digit_count": 0.14315,
+        "digit_ratio": 0.12394,
+        "hostname_length": 0.09895
+      },
+      "shortcut_only_baseline_accuracy": 0.9963
+    }
+  }
+}
