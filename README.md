@@ -20,7 +20,7 @@ Phishing attacks continue to be one of the leading vectors for credential theft,
 | Feature | Description |
 |---|---|
 | **URL scanner** | Scores the URL's hostname with a Random Forest trained on UCI PhiUSIIL (23 numeric features); never fetches or resolves the URL |
-| **Message scanner** | Classifies email text with a TF-IDF + Logistic Regression pipeline (trained once you supply the Kaggle dataset); never opens or resolves links; SMS not validated |
+| **Message scanner** | Classifies email text with a TF-IDF + Logistic Regression pipeline trained on the Kaggle phishing-email dataset; never opens or resolves links; SMS not validated |
 | **Explainable indicators** | MODEL indicators derived from each prediction (random-forest decision-path contributions; TF-IDF × coefficient terms), listed separately from HEURISTIC rule checks |
 | **Risk scoring** | 0-100 risk score derived from uncalibrated model probability; categorized as Low / Medium / High / Critical |
 | **Scan history** | SQLite-backed persistent history with pagination, record details, and individual record deletion |
@@ -236,13 +236,15 @@ The scanners return HTTP 503 until their models are trained. Download the datase
 
 ### Frontend
 
-Copy `.env.example` to `.env.local` to override the default API URL:
+By default (no `VITE_API_BASE_URL` set), the frontend calls the API on its own origin, e.g. `http://127.0.0.1:5173/api/...`. The Vite dev server (`npm run dev`) proxies every `/api` request to the backend at `http://127.0.0.1:8000`, configured in `frontend/vite.config.ts`. In development the browser never makes a cross-origin request, so CORS is not involved.
+
+To call a backend directly instead (for example, a different host or port), copy `.env.example` to `.env.local` and set:
 
 ```
 VITE_API_BASE_URL=http://127.0.0.1:8000
 ```
 
-The default is `http://127.0.0.1:8000` when no `.env.local` is present.
+The browser then calls that address directly, so the frontend's origin must be in the backend's `PHISHGUARD_CORS_ORIGINS` allowlist. That is already the case for `127.0.0.1:5173` and `localhost:5173`. A production build (`npm run build`) has no dev proxy: either set `VITE_API_BASE_URL` at build time, or serve `/api` from the same origin as the built files.
 
 ### Backend
 
@@ -401,7 +403,34 @@ Hand-picked probe URLs through the API (a sanity check, **not** an evaluation):
 
 ### Message model
 
-**Not yet trained in this repository** — the Kaggle dataset requires an account to download. After you place `data/Phishing_Email.csv` and run the command above, the metrics are written to `backend/models/message_phishing_model.metrics.json`, including the 20 terms weighted most strongly toward each class (check these for dataset artifacts such as signatures or company names).
+Trained 2026-11-15 on Kaggle `Phishing_Email.csv` (SHA-256 `18ef4fff1acb8986f0ab01e83ede6025420c829656af5a377560fce17e153b97`). Loader report: 18,650 rows read → 558 skipped (552 empty/placeholder bodies, 6 over 100,000 characters, including record 12501, a ~17 MB embedded CSV/notebook dump that is not an email) → 585 exact duplicates removed, 0 conflicting labels → **17,507 messages** (10,972 legitimate, 6,535 phishing) in 17,124 near-duplicate groups.
+
+Held-out test set: 3,502 messages, no near-duplicate group shared with the 14,005 training messages (group overlap 0). TF-IDF vocabulary: 250,000 terms.
+
+| Accuracy | Precision | Recall | F1 |
+|---|---|---|---|
+| **0.9843** | **0.9771** | **0.9809** | **0.9790** |
+
+| | Predicted legitimate | Predicted phishing |
+|---|---|---|
+| **Actual legitimate** | 2,165 | 30 |
+| **Actual phishing** | 25 | 1,282 |
+
+**These scores overstate real-world accuracy.** The terms the model weights most strongly toward *legitimate* are `enron`, `the`, `2002`, `thanks`, `on`, `wrote`, `2001`, `language`, `that`, `attached`, `vince`, `university`, `date`, `2000`, `linguistics`, `edu`. Most legitimate examples come from the early-2000s Enron corporate mailbox and academic and linguistics mailing lists, so the model partly learned "sounds like Enron or a university list" rather than "is safe". Toward *phishing* it weights `your`, `you`, `here`, `our`, `free`, `click here`, `money`, `remove`, `2005`, … — general marketing and second-person language.
+
+Hand-picked probe messages through the API (a sanity check, **not** an evaluation):
+
+| Message (abbreviated) | Score | Result |
+|---|---|---|
+| "Hi team, attached are the minutes from Tuesday's planning meeting…" | 10 | no phishing detected |
+| "Hey, are we still on for dinner Saturday at 7?…" | 36 | no phishing detected |
+| "Your Amazon order #112-4432 has shipped and will arrive Thursday…" | 75 | **false positive** (driven by "your", "order") |
+| "Hi Priya, your interview with our engineering team is confirmed…" | 67 | **false positive** (driven by "your", "our") |
+| "Your account has been suspended. Verify your password within 24 hours…" | 85 | potential phishing |
+| "Congratulations! You have won a $1000 gift card. Click here…" | 98 | potential phishing |
+| "Dear customer, we detected unusual sign-in activity. Confirm your banking details…" | 86 | potential phishing |
+
+The full report, including the 20 strongest terms in each direction, is written to `backend/models/message_phishing_model.metrics.json` when you train.
 
 ---
 
@@ -609,7 +638,7 @@ From the repository root:
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
-61 tests. Tests that check the production models run only when the matching artifact exists in `backend/models/`; otherwise they are reported as skipped. Currently that is 2 message-model tests.
+With both models trained, the latest run gives **63 passed, 0 skipped**. Tests that check the production models run only when the matching artifact exists in `backend/models/` and are reported as skipped otherwise. On a fresh clone without trained models, expect the 6 URL and 2 message production tests to be skipped.
 
 ### Test coverage
 
@@ -658,12 +687,13 @@ Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/api/analyze/message `
 
 1. **The URL dataset's legitimate class is homepages only.** Every legitimate PhiUSIIL example is `https://www.<domain>`. The shipped model therefore scores only the hostname and ignores paths and scheme. It still over-scores legitimate sites on non-`www` subdomains (`accounts.google.com` scores 99, `en.wikipedia.org` 79). Phishing signals in the path, such as `/login/verify`, appear only as heuristic indicators.
 2. **Moderate URL performance.** On held-out domains: accuracy 0.82, precision 0.87, **recall 0.63**. About a third of phishing hostnames in the test set were missed.
-3. **The message model is untrained here.** Until you train it on the Kaggle data, message scans return 503. Once trained, it covers English email bodies only. **SMS classification has not been validated.**
-4. **No calibration.** Risk scores come from uncalibrated `predict_proba` outputs; treat the 0–100 score as relative, not as a probability.
+3. **The message dataset is biased by where its emails came from.** Legitimate examples are mostly early-2000s Enron and academic or linguistics mailing-list emails, so terms like `enron`, `vince`, `2001`/`2002`, `university` and `edu` signal "legitimate". Modern legitimate emails that address the reader ("your order", "our team") can be flagged: a shipping notice scored 75 and an interview confirmation 67. The 0.98 held-out accuracy measures this dataset, not today's inboxes.
+4. **No calibration.** Risk scores come from uncalibrated `predict_proba` outputs of both models; treat the 0–100 score as relative, not as a probability.
 5. **One holdout split.** Metrics come from one domain- or near-duplicate-grouped 80/20 split, not cross-validation. They describe held-out performance on these datasets, not field accuracy.
 6. **Static, dated datasets.** Phishing campaigns change; accuracy on current threats is unknown.
 7. **No page, DNS, WHOIS, certificate or blocklist checks.** Nothing is fetched or resolved.
 8. **Explanations describe the model, not the truth.** A large contribution shows what drove the score, including dataset artifacts.
+9. **SMS is not validated.** The message model was trained and evaluated on email bodies only. It accepts SMS text, but no SMS data was used to measure its accuracy.
 
 ---
 
