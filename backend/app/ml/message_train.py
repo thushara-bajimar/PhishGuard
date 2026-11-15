@@ -27,6 +27,10 @@ DATASET_SOURCE = "Kaggle: Phishing Email Detection by subhajournal, Phishing_Ema
 DATASET_SOURCE_URL = "https://www.kaggle.com/datasets/subhajournal/phishingemails"
 FEATURE_SCHEMA_VERSION = 1
 MAX_TEXT_LENGTH = 100_000
+# The csv module refuses to read any field above its limit (default 128 KiB) and aborts the whole
+# file. Phishing_Email.csv contains one ~17 MB field (record 12501: an embedded CSV/notebook dump,
+# not an email), so allow fields up to 100 MiB to be *read*; MAX_TEXT_LENGTH then decides use.
+CSV_FIELD_SIZE_LIMIT = 100 * 1024 * 1024
 # Placeholder strings some public CSV exports use for an absent message body.
 MISSING_TEXT_MARKERS = frozenset({"empty", "nan", "none", "null"})
 
@@ -59,8 +63,7 @@ def _read_dataset(
     """
     if not csv_path.is_file():
         raise FileNotFoundError(f"Dataset CSV not found: {csv_path}")
-    # Email bodies can exceed the csv module's 128 KiB default field limit.
-    csv.field_size_limit(max(csv.field_size_limit(), 16 * 1024 * 1024))
+    csv.field_size_limit(max(csv.field_size_limit(), CSV_FIELD_SIZE_LIMIT))
 
     skipped: Counter[str] = Counter()
     texts: list[str] = []

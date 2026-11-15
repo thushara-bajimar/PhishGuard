@@ -5,11 +5,13 @@ All CSV rows here are small hand-written fixtures in tmp_path; none are used as 
 
 from __future__ import annotations
 
+import csv
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
-from app.ml.message_train import _near_duplicate_key, _read_dataset
+from app.ml.message_train import CSV_FIELD_SIZE_LIMIT, MAX_TEXT_LENGTH, _near_duplicate_key, _read_dataset
 from app.ml.train import load_labeled_urls
 
 
@@ -88,3 +90,47 @@ def test_near_duplicate_key_groups_templated_variants() -> None:
     second = "dear user  invoice 9920 is overdue! pay at http://other.example/zz"
     assert _near_duplicate_key(first) == _near_duplicate_key(second)
     assert _near_duplicate_key(first) != _near_duplicate_key("Team lunch is on Friday")
+
+
+@pytest.fixture
+def default_csv_field_limit() -> Iterator[None]:
+    """Start from the csv module's stock limit so the loader must raise it itself."""
+    previous = csv.field_size_limit(128 * 1024)
+    yield
+    csv.field_size_limit(previous)
+
+
+def test_message_loader_reads_fields_larger_than_16_mib(tmp_path: Path, default_csv_field_limit: None) -> None:
+    # Mirrors the real Kaggle file, whose record 12501 holds a ~17 MB field (above the old 16 MiB cap).
+    huge_body = "spam " * (17 * 1024 * 1024 // 5)
+    csv_path = tmp_path / "large-field.csv"
+    with csv_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["", "Email Text", "Email Type"])
+        writer.writerow([0, "Your account is locked, verify now", "Phishing Email"])
+        writer.writerow([1, huge_body, "Safe Email"])
+        writer.writerow([2, "Meeting moved to Friday", "Safe Email"])
+
+    texts, labels, _, report = _read_dataset(csv_path, "Email Text", "Email Type", "Phishing Email")
+
+    assert csv.field_size_limit() >= CSV_FIELD_SIZE_LIMIT > len(huge_body) > 16 * 1024 * 1024
+    assert report["rows_read"] == 3  # parsing continues past the large field
+    # The existing per-message length rule (not truncation) decides whether it is used for training.
+    assert len(huge_body) > MAX_TEXT_LENGTH and report["rows_skipped"] == {"text_too_long": 1}
+    assert texts == ["Your account is locked, verify now", "Meeting moved to Friday"]
+    assert labels == [1, 0]
+
+
+def test_message_loader_keeps_long_bodies_within_the_length_rule_intact(tmp_path: Path, default_csv_field_limit: None) -> None:
+    body = "Dear customer, " + "x" * (MAX_TEXT_LENGTH - 20) + " end"  # just under MAX_TEXT_LENGTH
+    csv_path = tmp_path / "long-body.csv"
+    with csv_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["Email Text", "Email Type"])
+        writer.writerow([body, "Phishing Email"])
+        writer.writerow(["Meeting moved to Friday", "Safe Email"])
+
+    texts, _, _, report = _read_dataset(csv_path, "Email Text", "Email Type", "Phishing Email")
+
+    assert texts[0] == body  # read verbatim, not truncated
+    assert report["rows_skipped_total"] == 0
