@@ -1,9 +1,9 @@
 import { useState, type FormEvent } from 'react'
-import { ApiError, analyzeMessage, analyzeUrl, type AnalysisResult, type ScanType } from '../api'
+import { ApiError, analyzeMessage, analyzeUrl, type AnalysisResult, type ModelStatus, type ScanType } from '../api'
 import { AnalysisResult as ResultPanel } from '../components/AnalysisResult'
 import { Icon } from '../components/Icons'
 
-export function ScannerPage({ type, onScanComplete, onApiStatus }: { type: ScanType; onScanComplete?: () => void; onApiStatus?: (online: boolean) => void }) {
+export function ScannerPage({ type, modelStatus, onScanComplete, onApiStatus }: { type: ScanType; modelStatus: ModelStatus | null; onScanComplete?: () => void; onApiStatus?: (online: boolean) => void }) {
   const [value, setValue] = useState('')
   const [result, setResult] = useState<AnalysisResult | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -51,6 +51,7 @@ export function ScannerPage({ type, onScanComplete, onApiStatus }: { type: ScanT
 
   return <div className="scanner-page">
     <div className="page-heading"><div><span className="section-kicker">THREAT ANALYSIS</span><h1>{isUrl ? 'URL scanner' : 'Message scanner'}</h1><p>{isUrl ? 'Inspect a suspicious link for phishing signals and risk indicators.' : 'Review email or SMS content for suspicious language and links.'}</p></div></div>
+    {modelStatus && !modelStatus.available && <div className="error-banner model-banner" role="status"><Icon name="alert" size={18}/><div><strong>The {isUrl ? 'URL' : 'message'} model is not available</strong><p>{modelStatus.detail ?? 'Train the model before scanning.'} Scans will return an error until a trained model artifact is present.</p></div></div>}
     <div className="scanner-layout"><section className="scanner-card"><div className="scanner-card-heading"><span className={`large-scan-icon ${isUrl ? 'quick-blue' : 'quick-violet'}`}><Icon name={isUrl ? 'link' : 'mail'} size={20} /></span><div><h2>{isUrl ? 'Analyze a web address' : 'Analyze message content'}</h2><p>{isUrl ? 'The URL is sent to the configured analysis service.' : 'Message content is sent to the configured analysis service.'}</p></div></div>
       <form onSubmit={submit} noValidate>
         <label className="input-label" htmlFor="scan-input">{isUrl ? 'URL TO INSPECT' : 'EMAIL OR SMS CONTENT'}</label>

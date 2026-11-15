@@ -67,9 +67,16 @@ async def request_validation_error_handler(_: Request, error: RequestValidationE
 
 
 @app.get("/api/health", tags=["system"])
-def health_check() -> dict[str, str]:
-    """Report API availability; this endpoint performs no detection."""
-    return {"status": "ok", "service": "phishguard-api"}
+def health_check() -> dict[str, object]:
+    """Report API availability and whether each trained model artifact loads; performs no detection."""
+    return {
+        "status": "ok",
+        "service": "phishguard-api",
+        "models": {
+            "url": url_prediction_service.status(),
+            "message": message_prediction_service.status(),
+        },
+    }
 
 
 @app.post(

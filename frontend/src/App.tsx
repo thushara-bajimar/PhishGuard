@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ApiError, deleteScan, getApiHealth, getScanHistory, getScanStatistics, type ScanRecord, type ScanStatistics } from './api'
+import { ApiError, deleteScan, getApiHealth, getScanHistory, getScanStatistics, type HealthResponse, type ScanRecord, type ScanStatistics } from './api'
 import { AppShell, type Page } from './components/AppShell'
 import { ScanDetailsDialog } from './components/ScanDetailsDialog'
 import { Dashboard } from './pages/Dashboard'
@@ -7,10 +7,15 @@ import { EducationPage } from './pages/EducationPage'
 import { HistoryPage } from './pages/HistoryPage'
 import { ScannerPage } from './pages/ScannerPage'
 
+const HISTORY_PAGE_SIZE = 25
+const RECENT_SCAN_COUNT = 5
+
 function App() {
   const [page, setPage] = useState<Page>('overview')
   const [apiOnline, setApiOnline] = useState<boolean | null>(null)
+  const [models, setModels] = useState<HealthResponse['models'] | null>(null)
   const [scans, setScans] = useState<ScanRecord[]>([])
+  const [recentScans, setRecentScans] = useState<ScanRecord[]>([])
   const [total, setTotal] = useState<number | null>(null)
   const [stats, setStats] = useState<ScanStatistics | null>(null)
   const [historyOffset, setHistoryOffset] = useState(0)
@@ -20,12 +25,29 @@ function App() {
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const closeScanDetails = useCallback(() => setSelectedScan(null), [])
 
+  const refreshHealth = useCallback(async () => {
+    try {
+      const health = await getApiHealth()
+      setApiOnline(true)
+      setModels(health.models ?? null)
+    } catch {
+      setApiOnline(false)
+      setModels(null)
+    }
+  }, [])
+
   const refreshHistory = useCallback(async (offset = 0) => {
     setHistoryLoading(true)
     setHistoryError(null)
     try {
-      const [history, statistics] = await Promise.all([getScanHistory(25, offset), getScanStatistics()])
+      // The dashboard always shows the newest scans, independent of the history page being viewed.
+      const [history, statistics, recent] = await Promise.all([
+        getScanHistory(HISTORY_PAGE_SIZE, offset),
+        getScanStatistics(),
+        offset === 0 ? null : getScanHistory(RECENT_SCAN_COUNT, 0),
+      ])
       setScans(history.items)
+      setRecentScans((recent ?? history).items.slice(0, RECENT_SCAN_COUNT))
       setHistoryOffset(history.offset)
       setTotal(history.total)
       setStats(statistics)
@@ -41,11 +63,9 @@ function App() {
   }, [])
 
   useEffect(() => {
-    let active = true
-    getApiHealth().then(() => { if (active) setApiOnline(true) }).catch(() => { if (active) setApiOnline(false) })
+    void refreshHealth()
     void refreshHistory()
-    return () => { active = false }
-  }, [refreshHistory])
+  }, [refreshHealth, refreshHistory])
 
   async function removeScan(scan: ScanRecord) {
     if (!window.confirm('Delete this scan record? This cannot be undone.')) return
@@ -53,7 +73,7 @@ function App() {
     try {
       await deleteScan(scan.id)
       if (selectedScan?.id === scan.id) setSelectedScan(null)
-      const nextOffset = total !== null && historyOffset >= total - 1 ? Math.max(0, historyOffset - 25) : historyOffset
+      const nextOffset = total !== null && historyOffset >= total - 1 ? Math.max(0, historyOffset - HISTORY_PAGE_SIZE) : historyOffset
       await refreshHistory(nextOffset)
     } catch (reason) {
       window.alert(reason instanceof Error ? reason.message : 'The scan could not be deleted.')
@@ -64,17 +84,17 @@ function App() {
 
   let content
   if (page === 'overview') {
-    content = <Dashboard scans={scans} total={total} stats={stats} loading={historyLoading} error={historyError} onRefresh={() => { void refreshHistory(0) }} onNavigate={setPage} onView={setSelectedScan} />
+    content = <Dashboard scans={recentScans} total={total} stats={stats} loading={historyLoading} error={historyError} onRefresh={() => { void refreshHealth(); void refreshHistory(0) }} onNavigate={setPage} onView={setSelectedScan} />
   } else if (page === 'url' || page === 'message') {
-    content = <ScannerPage key={page} type={page} onApiStatus={setApiOnline} onScanComplete={() => { void refreshHistory(0) }} />
+    content = <ScannerPage key={page} type={page} modelStatus={models?.[page] ?? null} onApiStatus={setApiOnline} onScanComplete={() => { void refreshHistory(0) }} />
   } else if (page === 'history') {
-    content = <HistoryPage scans={scans} total={total ?? 0} offset={historyOffset} pageSize={25} loading={historyLoading} error={historyError} onRefresh={() => { void refreshHistory(historyOffset) }} onPageChange={(offset) => { void refreshHistory(offset) }} onView={setSelectedScan} onDelete={(scan) => { void removeScan(scan) }} deletingId={deletingId} />
+    content = <HistoryPage scans={scans} total={total ?? 0} offset={historyOffset} pageSize={HISTORY_PAGE_SIZE} loading={historyLoading} error={historyError} onRefresh={() => { void refreshHistory(historyOffset) }} onPageChange={(offset) => { void refreshHistory(offset) }} onView={setSelectedScan} onDelete={(scan) => { void removeScan(scan) }} deletingId={deletingId} />
   } else {
     content = <EducationPage />
   }
 
   return (
-    <AppShell page={page} onNavigate={setPage} apiOnline={apiOnline}>
+    <AppShell page={page} onNavigate={setPage} apiOnline={apiOnline} models={models}>
       {content}
       <ScanDetailsDialog scan={selectedScan} onClose={closeScanDetails} />
     </AppShell>

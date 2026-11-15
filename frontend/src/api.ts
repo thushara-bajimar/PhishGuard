@@ -5,9 +5,16 @@ export type RiskCategory = 'low' | 'medium' | 'high' | 'critical'
 export type Prediction = 'potential_phishing' | 'no_phishing_detected'
 export type IndicatorSource = 'model' | 'heuristic'
 
+export interface ModelStatus {
+  available: boolean
+  model_version?: string
+  detail?: string
+}
+
 export interface HealthResponse {
   status: string
   service: string
+  models?: Record<ScanType, ModelStatus>
 }
 
 export interface AnalysisIndicator {

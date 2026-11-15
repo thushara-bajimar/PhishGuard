@@ -1,6 +1,9 @@
 import type { ReactNode } from 'react'
 import { useEffect, useRef, useState } from 'react'
+import type { HealthResponse } from '../api'
 import { Icon } from './Icons'
+
+const modelRows = [{ id: 'url', label: 'URL model' }, { id: 'message', label: 'Message model' }] as const
 
 export type Page = 'overview' | 'url' | 'message' | 'history' | 'learn'
 
@@ -12,7 +15,7 @@ const navigation: { id: Page; label: string; icon: 'grid' | 'link' | 'mail' | 'c
   { id: 'learn', label: 'Learn & protect', icon: 'book' },
 ]
 
-export function AppShell({ page, onNavigate, children, apiOnline }: { page: Page; onNavigate: (page: Page) => void; children: ReactNode; apiOnline: boolean | null }) {
+export function AppShell({ page, onNavigate, children, apiOnline, models }: { page: Page; onNavigate: (page: Page) => void; children: ReactNode; apiOnline: boolean | null; models: HealthResponse['models'] | null }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const menuButtonRef = useRef<HTMLButtonElement>(null)
   const sidebarRef = useRef<HTMLElement>(null)
@@ -52,6 +55,10 @@ export function AppShell({ page, onNavigate, children, apiOnline }: { page: Page
       <div className="sidebar-spacer" />
       <div className="sidebar-security-card"><div className="sidebar-card-icon"><Icon name="shield" size={16} /></div><strong>Stay one step ahead</strong><p>Learn to spot the signals before you click.</p><button onClick={() => navigate('learn')}>Explore safety tips <Icon name="arrow" size={13} /></button></div>
       <div className="sidebar-bottom" role="status" aria-live="polite"><span className={`api-dot ${apiOnline ? 'online' : apiOnline === false ? 'offline' : ''}`} /><span>Detection API</span><span className={`api-status ${apiOnline ? 'online-text' : apiOnline === false ? 'offline-text' : ''}`}>{apiOnline ? 'ONLINE' : apiOnline === false ? 'OFFLINE' : 'CHECKING'}</span></div>
+      {apiOnline && models && <div className="sidebar-models" role="status" aria-live="polite">{modelRows.map(({ id, label }) => {
+        const available = models[id]?.available
+        return <div className="sidebar-model-row" key={id} title={available ? undefined : models[id]?.detail}><span className={`api-dot ${available ? 'online' : 'offline'}`} /><span>{label}</span><span className={`api-status ${available ? 'online-text' : 'offline-text'}`}>{available ? 'READY' : 'UNAVAILABLE'}</span></div>
+      })}</div>}
       <div className="sidebar-version">PHISHGUARD <span>·</span> v0.1.0</div>
     </aside>
     <div className="main-column">

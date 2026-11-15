@@ -47,8 +47,9 @@ def redact_message(text: str) -> str:
 
 class ScanStore:
     def __init__(self, database_path: Path | None = None) -> None:
+        # An explicit path (tests, tooling) wins over the environment so it can never hit the live database.
         configured_path = os.environ.get("PHISHGUARD_DATABASE_PATH")
-        self.database_path = Path(configured_path) if configured_path else (database_path or DEFAULT_DATABASE_PATH)
+        self.database_path = database_path or (Path(configured_path) if configured_path else DEFAULT_DATABASE_PATH)
 
     def _connect(self) -> sqlite3.Connection:
         self.database_path.parent.mkdir(parents=True, exist_ok=True)

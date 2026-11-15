@@ -8,7 +8,7 @@ export function Dashboard({ scans, total, stats, loading, error, onRefresh, onNa
   return <div className="dashboard-page">
     <div className="page-heading"><div><span className="section-kicker">SECURITY OVERVIEW</span><h1>Good to see you.</h1><p>Monitor scan activity and inspect potential threats in your workspace.</p></div><button className="secondary-button" onClick={onRefresh} disabled={loading}><Icon name="refresh" size={15} /> Refresh data</button></div>
     <section className="metric-grid" aria-label="Scan statistics">
-      <MetricCard label="Total scans" value={stats?.total_scans ?? total} note={total === null ? 'Awaiting scan history API' : 'All recorded analyses'} icon="grid" tone="blue" />
+      <MetricCard label="Total scans" value={stats?.total_scans ?? total} note={stats ? `${stats.url_scans} URL · ${stats.message_scans} message` : total === null ? 'Awaiting scan history API' : 'All recorded analyses'} icon="grid" tone="blue" />
       <MetricCard label="Phishing detections" value={stats?.phishing_detections ?? null} note={stats ? 'Potential phishing predictions' : 'Awaiting statistics API'} icon="alert" tone="red" />
       <MetricCard label="Suspicious results" value={stats?.suspicious_results ?? null} note={stats ? 'High or critical risk category' : 'Awaiting statistics API'} icon="search" tone="amber" />
     </section>

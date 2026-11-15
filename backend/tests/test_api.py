@@ -139,4 +139,7 @@ def test_unexpected_error_is_generic_and_does_not_echo_input(client: TestClient,
 
 
 def test_health_endpoint(client: TestClient) -> None:
-    assert client.get("/api/health").json() == {"status": "ok", "service": "phishguard-api"}
+    body = client.get("/api/health").json()
+    assert {key: body[key] for key in ("status", "service")} == {"status": "ok", "service": "phishguard-api"}
+    assert set(body["models"]) == {"url", "message"}
+    assert all(isinstance(status["available"], bool) for status in body["models"].values())

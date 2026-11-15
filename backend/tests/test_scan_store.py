@@ -73,3 +73,10 @@ def test_message_redacts_scheme_less_and_www_link_query_values() -> None:
 
     assert "private" not in redacted
     assert "othersecret" not in redacted
+
+
+def test_explicit_database_path_overrides_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PHISHGUARD_DATABASE_PATH", str(tmp_path / "from-env.sqlite3"))
+
+    assert ScanStore(tmp_path / "explicit.sqlite3").database_path == tmp_path / "explicit.sqlite3"
+    assert ScanStore().database_path == tmp_path / "from-env.sqlite3"
