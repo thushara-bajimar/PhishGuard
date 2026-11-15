@@ -67,6 +67,8 @@ class ModelInfoResponse(BaseModel):
     feature_schema_version: int
     risk_score_note: str
     scope_note: str | None = None
+    input_scope: str | None = None
+    explanation_method: str | None = None
 
 
 class AnalysisResponse(BaseModel):

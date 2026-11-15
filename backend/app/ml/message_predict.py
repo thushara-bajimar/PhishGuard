@@ -33,8 +33,38 @@ class ModelUnavailableError(RuntimeError):
     """Raised when no compatible locally trained message model is available."""
 
 
+EXPLANATION_METHOD = "TF-IDF weight x logistic-regression coefficient per term (per-prediction log-odds contribution)"
+MAX_MODEL_INDICATORS = 6
+MIN_TERM_CONTRIBUTION = 0.05  # log-odds
+
+
+def message_model_indicators(pipeline: Pipeline, term_names: np.ndarray, text: str) -> list[dict[str, str]]:
+    """Return the terms in this message that moved the classifier's log-odds most, as source="model"."""
+    vectorizer = pipeline.named_steps.get("tfidf")
+    classifier = pipeline.named_steps.get("classifier")
+    if vectorizer is None or classifier is None or not hasattr(classifier, "coef_"):
+        return []
+    row = vectorizer.transform([text]).tocsr()
+    coefficients = classifier.coef_[0]
+    phishing_sign = 1.0 if list(classifier.classes_).index(1) == 1 else -1.0
+    contributions = row.data * coefficients[row.indices] * phishing_sign
+    indicators: list[dict[str, str]] = []
+    for position in np.argsort(-np.abs(contributions))[:MAX_MODEL_INDICATORS]:
+        contribution = float(contributions[position])
+        if abs(contribution) < MIN_TERM_CONTRIBUTION:
+            break
+        term = str(term_names[row.indices[position]])
+        toward = "toward phishing" if contribution > 0 else "toward legitimate"
+        indicators.append({
+            "name": f'Term "{term}"',
+            "description": f"The classifier weighted this term {toward} in this message (log-odds {contribution:+.2f}).",
+            "source": "model",
+        })
+    return indicators
+
+
 @lru_cache(maxsize=4)
-def _load_artifact(path_string: str) -> tuple[Pipeline, dict[str, Any]]:
+def _load_artifact(path_string: str) -> tuple[Pipeline, dict[str, Any], np.ndarray | None]:
     path = Path(path_string)
     if not path.is_file():
         raise ModelUnavailableError(
@@ -50,7 +80,9 @@ def _load_artifact(path_string: str) -> tuple[Pipeline, dict[str, Any]]:
         raise ModelUnavailableError("The message model feature schema is incompatible. Retrain the message model.")
     if 1 not in list(artifact["pipeline"].classes_):
         raise ModelUnavailableError("The message artifact does not contain a phishing class. Retrain it with both labels.")
-    return artifact["pipeline"], artifact["metadata"]
+    vectorizer = artifact["pipeline"].named_steps.get("tfidf")
+    term_names = vectorizer.get_feature_names_out() if vectorizer is not None else None
+    return artifact["pipeline"], artifact["metadata"], term_names
 
 
 def extract_message_indicators(text: str) -> list[dict[str, str]]:
@@ -78,10 +110,18 @@ def extract_message_indicators(text: str) -> list[dict[str, str]]:
 class MessagePredictionService:
     def __init__(self, model_path: Path | None = None) -> None:
         configured_path = os.environ.get("PHISHGUARD_MESSAGE_MODEL_PATH")
-        self.model_path = Path(configured_path) if configured_path else (model_path or DEFAULT_MODEL_PATH)
+        self.model_path = model_path or (Path(configured_path) if configured_path else DEFAULT_MODEL_PATH)
+
+    def status(self) -> dict[str, Any]:
+        """Report whether a compatible artifact loads, without classifying anything."""
+        try:
+            _, metadata, _ = _load_artifact(str(self.model_path.resolve()))
+        except ModelUnavailableError as error:
+            return {"available": False, "detail": str(error)}
+        return {"available": True, "model_version": str(metadata.get("trained_at_utc", "unknown"))}
 
     def analyze(self, text: str) -> dict[str, Any]:
-        pipeline, metadata = _load_artifact(str(self.model_path.resolve()))
+        pipeline, metadata, term_names = _load_artifact(str(self.model_path.resolve()))
         try:
             phishing_index = list(pipeline.classes_).index(1)
             phishing_score = float(pipeline.predict_proba([text])[0][phishing_index])
@@ -105,7 +145,8 @@ class MessagePredictionService:
             "prediction": "potential_phishing" if phishing_score >= 0.5 else "no_phishing_detected",
             "risk_score": risk_score,
             "risk_category": risk_category,
-            "indicators": extract_message_indicators(text),
+            "indicators": (message_model_indicators(pipeline, term_names, text) if term_names is not None else [])
+            + extract_message_indicators(text),
             "disclaimer": DISCLAIMER,
             "model_name": str(metadata.get("model_name", MODEL_NAME)),
             "model_version": str(metadata.get("trained_at_utc", "unknown")),
@@ -118,9 +159,14 @@ class MessagePredictionService:
                 "sklearn_version": metadata.get("sklearn_version"),
                 "feature_schema_version": metadata.get("feature_schema_version"),
                 "risk_score_note": "Derived from the model's uncalibrated phishing-class score; not a calibrated probability.",
-                "scope_note": "Training source contains email bodies; performance on SMS text has not been evaluated.",
+                "scope_note": "Training source contains email bodies only; SMS classification has not been validated.",
+                "explanation_method": EXPLANATION_METHOD if term_names is not None else None,
             },
-            "explanation_note": "Indicators are independently matched message warning patterns, not explanations or feature attributions from the text classifier.",
+            "explanation_note": (
+                "Model indicators are the terms in this message that moved the text classifier's score most "
+                "(TF-IDF weight x learned coefficient). Heuristic indicators are separate pattern checks, "
+                "not explanations from the classifier."
+            ),
         }
 
 

@@ -30,4 +30,7 @@ def test_url_pipeline_is_fitted_saved_loaded_and_used(tmp_path: Path) -> None:
     assert response["prediction"] in {"potential_phishing", "no_phishing_detected"}
     assert 0 <= response["risk_score"] <= 100
     assert response["model_info"]["algorithm"] == "RandomForestClassifier"
-    assert all(indicator["source"] == "heuristic" for indicator in response["indicators"])
+    sources = [indicator["source"] for indicator in response["indicators"]]
+    assert set(sources) <= {"model", "heuristic"}
+    assert "heuristic" in sources
+    assert sources == sorted(sources, key=lambda source: source != "model")  # model explanations listed first

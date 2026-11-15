@@ -47,5 +47,6 @@ def test_training_saves_and_loads_a_fitted_pipeline(tmp_path: Path) -> None:
     result = MessagePredictionService(model_path).analyze("URGENT verify your account password now")
     assert result["prediction"] in {"potential_phishing", "no_phishing_detected"}
     assert 0 <= result["risk_score"] <= 100
-    assert all(item["source"] == "heuristic" for item in result["indicators"])
+    assert {item["source"] for item in result["indicators"]} <= {"model", "heuristic"}
+    assert any(item["source"] == "heuristic" for item in result["indicators"])
     assert "uncalibrated" in result["model_info"]["risk_score_note"]

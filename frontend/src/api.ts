@@ -25,6 +25,8 @@ export interface ModelInfo {
   feature_schema_version: number
   risk_score_note: string
   scope_note?: string | null
+  input_scope?: string | null
+  explanation_method?: string | null
 }
 
 export interface ScanRecord {
