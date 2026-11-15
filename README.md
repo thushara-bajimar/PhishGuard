@@ -19,15 +19,15 @@ Phishing attacks continue to be one of the leading vectors for credential theft,
 
 | Feature | Description |
 |---|---|
-| **URL scanner** | Analyzes a URL with a trained Random Forest classifier; extracts 23 numeric features without fetching the URL |
-| **Message scanner** | Classifies email/SMS text with a TF-IDF + Logistic Regression pipeline; never opens or resolves links |
-| **Explainable indicators** | Heuristic signals (IP host, URL shortener, urgency keywords, etc.) displayed separately from the model prediction |
+| **URL scanner** | Scores the URL's hostname with a Random Forest trained on UCI PhiUSIIL (23 numeric features); never fetches or resolves the URL |
+| **Message scanner** | Classifies email text with a TF-IDF + Logistic Regression pipeline (trained once you supply the Kaggle dataset); never opens or resolves links; SMS not validated |
+| **Explainable indicators** | MODEL indicators derived from each prediction (random-forest decision-path contributions; TF-IDF × coefficient terms), listed separately from HEURISTIC rule checks |
 | **Risk scoring** | 0-100 risk score derived from uncalibrated model probability; categorized as Low / Medium / High / Critical |
 | **Scan history** | SQLite-backed persistent history with pagination, record details, and individual record deletion |
-| **Dashboard statistics** | Total scans, phishing detections, and suspicious result counts |
+| **Dashboard statistics** | Total scans (URL / message split), phishing detections, suspicious result counts, and the newest scans |
 | **Input redaction** | URL query values, email addresses, phone numbers, and credential tokens are masked before storage |
 | **Security disclaimers** | Every result includes a disclaimer that the assessment is informational and not a guarantee of safety |
-| **API health check** | `/api/health` shows whether the backend is reachable (does not imply models are trained) |
+| **API and model health** | `/api/health` reports the API and whether each trained model loads; the sidebar shows READY / UNAVAILABLE per model |
 | **Education page** | Static security-awareness content about phishing warning signs and safer habits |
 | **Keyboard navigation** | Skip-to-main-content link, focus trap in the scan details dialog, Escape to close |
 | **Responsive layout** | Full sidebar on desktop; slide-in drawer on mobile (<=760 px breakpoint) |
@@ -81,7 +81,8 @@ flowchart TD
 **Key design decisions:**
 
 - Model artifacts are loaded lazily on first request and cached with `@lru_cache`; the server does not crash on startup if models are absent — it returns `503` per request.
-- Heuristic indicators and model predictions are generated independently and are never mixed or presented as the same signal.
+- Model-derived explanations (`source: "model"`) and heuristic rule checks (`source: "heuristic"`) are computed independently and always labelled separately.
+- The URL pipeline contains its input-scope step (hostname by default), so training and inference always see the same part of the URL.
 - Input redaction happens in `ScanStore.save()` *before* any write to SQLite; request bodies are never logged by application code.
 - CORS origins are configurable via environment variable; the default allowlist is `localhost:5173` and `127.0.0.1:5173`.
 
@@ -107,7 +108,7 @@ flowchart TD
 |---|---|
 | Framework | React 19 + TypeScript 5.8 |
 | Build tool | Vite 6 |
-| CSS | Vanilla CSS (custom design system) |
+| CSS | Custom design system in `styles.css` (Tailwind CSS v4 is imported via `@tailwindcss/vite`) |
 | Fonts | DM Sans, DM Mono, Manrope (Google Fonts) |
 | HTTP client | Fetch API (typed wrapper in `api.ts`) |
 
@@ -128,6 +129,8 @@ PhishGuard/
 ├── requirements.txt          # Production Python dependencies
 ├── requirements-dev.txt      # Dev/test Python dependencies
 ├── .gitignore
+├── data/                     # Downloaded datasets (gitignored; see Dataset Sources)
+├── docs/model-reports/       # Committed evaluation reports from real training runs
 │
 ├── backend/
 │   ├── app/
@@ -152,11 +155,14 @@ PhishGuard/
 │   │   ├── message_phishing_model.joblib
 │   │   └── message_phishing_model.metrics.json
 │   └── tests/
-│       ├── test_api.py              # API integration tests (monkeypatched models)
-│       ├── test_scan_store.py       # SQLite persistence + redaction unit tests
-│       ├── test_url_features.py     # URL feature extraction + transformer tests
-│       ├── test_url_model.py        # Full train to load to predict roundtrip
-│       └── test_message_model.py    # Full message train to predict roundtrip
+│       ├── test_api.py                  # API contract tests (stubbed models)
+│       ├── test_prediction_workflows.py # Real-service end-to-end workflows + production-artifact checks
+│       ├── test_model_explanations.py   # Model-derived explanation correctness
+│       ├── test_dataset_loaders.py      # Loader filtering / dedup / conflict handling
+│       ├── test_scan_store.py           # SQLite persistence + redaction unit tests
+│       ├── test_url_features.py         # URL feature extraction + transformer tests
+│       ├── test_url_model.py            # Full train to load to predict roundtrip
+│       └── test_message_model.py        # Full message train to predict roundtrip
 │
 └── frontend/
     ├── index.html
@@ -220,6 +226,10 @@ cd frontend
 npm install
 ```
 
+### 3. Datasets and models
+
+The scanners return HTTP 503 until their models are trained. Download the datasets ([Dataset Sources](#dataset-sources)), then run the two training commands ([Model Training](#model-training)).
+
 ---
 
 ## Environment Configuration
@@ -247,91 +257,175 @@ The default is `http://127.0.0.1:8000` when no `.env.local` is present.
 
 ## Dataset Sources
 
-### URL Model Dataset
+Datasets are **not** committed and are never downloaded automatically by the app. Place both CSVs in a `data/` folder at the repository root (`data/` is gitignored).
 
-**UCI Machine Learning Repository — PhiUSIIL Phishing URL (Website), dataset 967**
+| Model | Dataset | Expected file | Columns used | Phishing label |
+|---|---|---|---|---|
+| URL | UCI PhiUSIIL Phishing URL (dataset 967), CC BY 4.0 | `data/PhiUSIIL_Phishing_URL_Dataset.csv` | `URL`, `label` | `0` (`1` = legitimate) |
+| Message | Kaggle "Phishing Email Detection" by subhajournal, LGPL-3.0 | `data/Phishing_Email.csv` | `Email Text`, `Email Type` | `Phishing Email` (other value: `Safe Email`) |
 
-- URL: https://archive.ics.uci.edu/dataset/967/phiusiil+phishing+url+dataset
-- License: CC BY 4.0
-- Size: 235,795 instances (134,850 legitimate, 100,945 phishing)
-- Label convention: **`1` = legitimate, `0` = phishing** (pass `--phishing-label 0`)
-- Citation: Prasad and Chandra (2024), DOI 10.1016/j.cose.2023.103545
+### URL dataset — UCI PhiUSIIL (no account needed)
 
-Download the CSV from the UCI record page, extract it, and save it as:
+- Record page: https://archive.ics.uci.edu/dataset/967/phiusiil+phishing+url+dataset
+- 235,795 rows (134,850 legitimate, 100,945 phishing). Citation: Prasad and Chandra (2024), DOI 10.1016/j.cose.2023.103545.
+- The trainer reads only `URL` and `label`; the 54 page-content columns are ignored so inference needs nothing but a URL string.
 
-```
-data/PhiUSIIL_Phishing_URL_Dataset.csv
-```
+From the repository root (PowerShell):
 
-> The trainer reads **only** the URL and label columns, ignoring all UCI page-content features. This ensures inference requires only a URL string.
-
-### Message Model Dataset
-
-**Kaggle — Phishing Email Detection by subhajournal**
-
-- URL: https://www.kaggle.com/datasets/subhajournal/phishingemails
-- License: LGPL-3.0
-- File: `Phishing_Email.csv`
-- Columns: `Email Text` (body), `Email Type` (label)
-- Positive label: **`Phishing Email`**
-- Note: This is email data; SMS performance has not been evaluated.
-
-Download the CSV from Kaggle and save it as:
-
-```
-data/Phishing_Email.csv
+```powershell
+New-Item -ItemType Directory -Force data | Out-Null
+Invoke-WebRequest -Uri "https://archive.ics.uci.edu/static/public/967/phiusiil+phishing+url+dataset.zip" -OutFile data\phiusiil.zip
+Expand-Archive data\phiusiil.zip -DestinationPath data
+Remove-Item data\phiusiil.zip
 ```
 
-> No dataset is downloaded automatically. No dataset file is committed to the repository.
+The CSV used for the metrics below has SHA-256 `a236549cd369cd80bd478ff8e1779cbf44c58d5c3f79f7a51a1adbed7d06d1c6` (`Get-FileHash data\PhiUSIIL_Phishing_URL_Dataset.csv`).
+
+### Message dataset — Kaggle (free Kaggle account needed)
+
+1. Sign in at https://www.kaggle.com and open https://www.kaggle.com/datasets/subhajournal/phishingemails
+2. Click **Download**, extract the archive, and save `Phishing_Email.csv` as `data/Phishing_Email.csv`.
+
+Or, with the Kaggle CLI and an API token in `%USERPROFILE%\.kaggle\kaggle.json`:
+
+```powershell
+pip install kaggle
+kaggle datasets download -d subhajournal/phishingemails -p data --unzip
+```
+
+The dataset contains email bodies only. Nothing in this project validates SMS classification.
+
+---
+
+## Dataset Preparation
+
+Both loaders (`load_labeled_urls` in `train.py`, `_read_dataset` in `message_train.py`) skip unusable rows instead of aborting, and every decision is counted in the `rows` section of the metrics JSON:
+
+| Decision | URL loader | Message loader |
+|---|---|---|
+| Wrong number of CSV fields | skipped (`malformed_row`) | skipped (`malformed_row`) |
+| Empty input or label | skipped (`missing_url_or_label`) | skipped (`missing_text` / `missing_label`); placeholder bodies `empty`, `nan`, `none`, `null` count as missing |
+| Over-length input | > 4,096 chars skipped | > 100,000 chars skipped |
+| Unparseable / non-HTTP(S) URL | skipped (`invalid_or_non_http_url`) | — |
+| Exact duplicates | first copy kept (scheme/host case, trailing slash, default port normalized) | first copy kept (case and whitespace normalized) |
+| Same input with conflicting labels | **every copy dropped** | **every copy dropped** |
+| Leakage control for the split | grouped by registered domain (`example.co.uk`) | grouped by a near-duplicate key (links → `url`, digits → `0`, punctuation removed) |
+
+The URL trainer deduplicates a second time on exactly the text the model sees (its input scope, below), so identical model inputs cannot fall on both sides of the split.
+
+Actual PhiUSIIL loader report: 235,795 rows read → 4 skipped (`url_too_long`), 1,823 duplicates removed, 2 conflicting rows dropped → 233,966 unique URLs → 14,774 hostname-level duplicates and 157 hostname-level conflicts removed → **219,035 rows** used for training and evaluation.
 
 ---
 
 ## Model Training
 
-Both training scripts must be run from the **`backend/`** directory with the virtual environment active.
+Run from the **`backend/`** directory. The virtual environment lives in the repository root, hence `..\.venv`.
 
 ### Train the URL model
 
 ```powershell
-# From PhishGuard/backend/
-.\.venv\Scripts\python.exe -m app.ml.train `
+cd backend
+..\.venv\Scripts\python.exe -m app.ml.train `
   --data ..\data\PhiUSIIL_Phishing_URL_Dataset.csv `
-  --url-column URL `
-  --label-column label `
-  --phishing-label 0
+  --url-column URL --label-column label --phishing-label 0
 ```
 
-> **Output**: `backend/models/url_phishing_model.joblib` and `url_phishing_model.metrics.json`
+About 2 minutes on a laptop. `--input-scope` chooses what part of the URL the model sees:
 
-Training details:
+| `--input-scope` | Model input | Notes |
+|---|---|---|
+| `hostname` (default, shipped) | hostname without scheme, port, path, query or a leading `www.` | best option PhiUSIIL can validly support |
+| `url` | the full URL | learns dataset shortcuts; not recommended (see evaluation) |
+| `registered_domain` | e.g. `verify-account.info` | removes almost all signal |
 
-- Extracts 23 URL-only numeric features (no DNS/HTTP requests)
-- Deduplicates normalized URLs; fails on conflicting labels
-- Uses `StratifiedGroupKFold` (5-fold) grouped by registered domain to prevent domain leakage
-- Fits a `RandomForestClassifier` (400 trees, balanced subsample weighting)
-- Prints precision, recall, F1, and confusion matrix to stdout
+The scope step is part of the saved pipeline, so inference always applies the same reduction. The 23 numeric features are unchanged; RandomForest with 400 trees, balanced class weights, `random_state=42`.
 
 ### Train the message model
 
 ```powershell
-# From PhishGuard/backend/
-.\.venv\Scripts\python.exe -m app.ml.message_train `
-  --data ..\data\Phishing_Email.csv `
-  --text-column "Email Text" `
-  --label-column "Email Type" `
-  --phishing-label "Phishing Email"
+cd backend
+..\.venv\Scripts\python.exe -m app.ml.message_train --data ..\data\Phishing_Email.csv
 ```
 
-> **Output**: `backend/models/message_phishing_model.joblib` and `message_phishing_model.metrics.json`
+Defaults match the Kaggle file (`--text-column "Email Text" --label-column "Email Type" --phishing-label "Phishing Email"`). Pipeline: TF-IDF (unigrams + bigrams, `min_df=2`, sublinear TF, up to 250k terms) + `LogisticRegression` (balanced, liblinear).
 
-Training details:
+Restart the backend after training; `/api/health` and the sidebar then report the model as READY.
 
-- Lowercased + Unicode-normalized TF-IDF (unigrams + bigrams, up to 250k features)
-- Exact-text deduplication with SHA-256; grouped 5-fold split
-- `LogisticRegression` with balanced class weighting
-- Prints precision, recall, F1, and confusion matrix to stdout
+---
 
-> **Important**: Model `predict_proba` scores are **not calibrated**. Risk scores and model confidence values are derived from uncalibrated probabilities and must not be interpreted as real-world probability of being phishing.
+## Model Evaluation
+
+Both trainers use the first fold of `StratifiedGroupKFold(n_splits=5, shuffle=True, random_state=42)` as an 80/20 holdout and report accuracy, precision, recall, F1 (phishing = positive class) and the confusion matrix. Scores are uncalibrated.
+
+### URL model (trained 2026-11-15, input scope `hostname`)
+
+Held-out test set: 43,806 URLs whose registered domains never appear in the 175,229 training rows (host overlap 0).
+
+| Accuracy | Precision | Recall | F1 |
+|---|---|---|---|
+| **0.8216** | **0.8655** | **0.6349** | **0.7325** |
+
+| | Predicted legitimate | Predicted phishing |
+|---|---|---|
+| **Actual legitimate** | 25,296 | 1,662 |
+| **Actual phishing** | 6,151 | 10,697 |
+
+Top feature importances: `subdomain_count` 0.367, `hostname_dot_count` 0.137, `url_length` (here: hostname length) 0.091, `host_digit_ratio` 0.089, `hostname_length` 0.086.
+
+Full report: [`docs/model-reports/url_phishing_model.metrics.json`](docs/model-reports/url_phishing_model.metrics.json).
+
+### Shortcut-bias investigation
+
+Every legitimate PhiUSIIL URL is an `https://www.<domain>` homepage: 100% HTTPS, 100% `www.`, 0% with a path, compared with 45%, 47% and 17% of phishing URLs. A depth-3 decision tree using only those three flags reaches **0.9967 accuracy** on the same split. The same RandomForest trained with each input scope:
+
+| Input scope | Accuracy | Precision | Recall | F1 | Top features |
+|---|---|---|---|---|---|
+| `url` | 0.9981 | 0.9995 | 0.9959 | 0.9977 | `https_present` 0.41, `path_length` 0.20 |
+| **`hostname` (shipped)** | **0.8216** | **0.8655** | **0.6349** | **0.7325** | `subdomain_count` 0.37, `hostname_dot_count` 0.14 |
+| `registered_domain` | 0.6614 | 0.3691 | 0.5199 | 0.4317 | digit and dot ratios |
+
+The full-URL model's 99.8% mostly reflects the dataset's construction, not phishing detection: in a probe run it scored ordinary GitHub, Wikipedia, docs.python.org and Amazon pages with paths at 1.0 (phishing). The hostname model is shipped because its errors are smaller and visible, but one shortcut remains: legitimate hosts never have subdomains other than `www`, so `subdomain_count` is the top feature. See [`docs/model-reports/url_input_scope_comparison.json`](docs/model-reports/url_input_scope_comparison.json).
+
+Hand-picked probe URLs through the API (a sanity check, **not** an evaluation):
+
+| URL | Score | Result |
+|---|---|---|
+| `https://www.bbc.co.uk/news` | 7 | no phishing detected |
+| `https://www.google.com` | 34 | no phishing detected |
+| `https://github.com/python/cpython` | 34 | no phishing detected |
+| `https://en.wikipedia.org/wiki/Phishing` | 79 | **false positive** (subdomain) |
+| `https://accounts.google.com/signin` | 99 | **false positive** (subdomain + "accounts") |
+| `http://192.168.10.5/bank/login.php` | 100 | potential phishing |
+| `https://appleid.apple.com.verify-account-locked.info/signin` | 100 | potential phishing |
+| `http://login-microsoftonline-verify365.com/` | 96 | potential phishing |
+
+### Message model
+
+**Not yet trained in this repository** — the Kaggle dataset requires an account to download. After you place `data/Phishing_Email.csv` and run the command above, the metrics are written to `backend/models/message_phishing_model.metrics.json`, including the 20 terms weighted most strongly toward each class (check these for dataset artifacts such as signatures or company names).
+
+---
+
+## Model Explanations
+
+Each result lists **MODEL** indicators (derived from the trained model for this specific input) before **HEURISTIC** indicators (independent rule checks). They are never mixed.
+
+- **URL model:** an exact decision-path decomposition of the random forest (the "treeinterpreter" method). In each tree, the change in phishing probability at every split is credited to the feature used there. Averaged over the 400 trees, the baseline score (the training average, about 50/100) plus all contributions equals the model's score exactly. The up to 4 features that moved the score by at least 1 point are shown, for example `Subdomain labels = 1 — raised the model's phishing score by 33 points`. Adds about 220 ms per request.
+- **Message model:** for each term in the message, the contribution is its TF-IDF weight × the logistic-regression coefficient, in log-odds. Up to 6 terms are shown, each marked as pushing toward phishing or toward legitimate.
+
+These explain what the model did, not whether it is right. A large contribution from `subdomain_count` on a legitimate site is the dataset bias described above.
+
+---
+
+## Model Artifacts
+
+| File | Created by | In Git? |
+|---|---|---|
+| `backend/models/url_phishing_model.joblib` (~41 MB) | `app.ml.train` | no (gitignored; regenerate with the command above) |
+| `backend/models/url_phishing_model.metrics.json` | `app.ml.train` | no; a copy of the shipped run is in `docs/model-reports/` |
+| `backend/models/message_phishing_model.joblib` | `app.ml.message_train` | no |
+| `backend/models/message_phishing_model.metrics.json` | `app.ml.message_train` | no |
+
+Artifacts are loaded once per process and must match feature schema version 3. Older artifacts are rejected with a "Retrain" message. Override locations with `PHISHGUARD_MODEL_PATH` / `PHISHGUARD_MESSAGE_MODEL_PATH`.
 
 ---
 
@@ -373,12 +467,19 @@ All endpoints return JSON. Error responses include a `detail` field. Submitted i
 
 ### `GET /api/health`
 
-Returns service availability. Does **not** verify that models are trained.
+Returns service availability and whether each trained model artifact loads. It performs no detection.
 
 **Response:**
 
 ```json
-{ "status": "ok", "service": "phishguard-api" }
+{
+  "status": "ok",
+  "service": "phishguard-api",
+  "models": {
+    "url": { "available": true, "model_version": "2026-11-15T09:25:15.912030+00:00" },
+    "message": { "available": false, "detail": "The message model is not trained or the artifact is missing. ..." }
+  }
+}
 ```
 
 ---
@@ -501,40 +602,40 @@ Return aggregate scan statistics.
 
 ## Testing
 
-From the `backend/` directory:
+From the repository root:
 
 ```powershell
-# Install dev dependencies (includes pytest + httpx)
-pip install -r ..\requirements-dev.txt
-
-# Run all tests
-python -m pytest -q
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.\.venv\Scripts\python.exe -m pytest -q
 ```
+
+61 tests. Tests that check the production models run only when the matching artifact exists in `backend/models/`; otherwise they are reported as skipped. Currently that is 2 message-model tests.
 
 ### Test coverage
 
-| File | What it tests |
-|---|---|
-| `test_api.py` | All API endpoints, input validation, model-unavailable 503, storage failure 503, generic error handler (no input echo), health check |
-| `test_scan_store.py` | SQLite persistence (save/list/get/delete/stats), URL query redaction, message redaction (email, phone, secrets, URL queries) |
-| `test_url_features.py` | Feature extraction correctness, transformer shape/feature order, Pydantic URL validation |
-| `test_url_model.py` | Full train to save to load to predict roundtrip with synthetic CSV data |
-| `test_message_model.py` | Heuristic indicator detection, full message train to predict roundtrip |
+| File | Tests | What it covers |
+|---|---|---|
+| `test_api.py` | 11 | All endpoints with stubbed models: validation, 503 when a model is unavailable, storage failure, the generic error handler (input never echoed), health shape |
+| `test_prediction_workflows.py` | 20 | Real, non-stubbed services: request → model → SQLite → history round trip; missing, corrupt and wrong-schema artifacts → 503 and health "unavailable"; invalid inputs → 422; production-artifact checks |
+| `test_model_explanations.py` | 5 | The forest decomposition sums exactly to the model score; indicator formatting and threshold; message-term contributions; model-before-heuristic ordering |
+| `test_dataset_loaders.py` | 4 | Skipped-row reasons and counts, duplicate and conflicting-label handling, near-duplicate grouping |
+| `test_scan_store.py` | 5 | SQLite persistence, redaction, explicit database path wins over the env var |
+| `test_url_features.py` | 12 | Feature extraction, transformer shape and order, URL validation |
+| `test_url_model.py` / `test_message_model.py` | 1 / 3 | Train → save → load → predict round trips |
 
-> Tests that exercise model training use synthetic rows in `tmp_path` — they do not use or require the downloaded public datasets.
+> Model tests train on small fixtures written to `tmp_path`. These are never used as training data for the shipped models or for any reported metric.
+
+The frontend has no automated tests. Check it with `npm run build` (TypeScript + Vite).
 
 **Test a running API manually (PowerShell):**
 
 ```powershell
-# Health check
-Invoke-RestMethod -Uri http://127.0.0.1:8000/api/health
+Invoke-RestMethod -Uri http://127.0.0.1:8000/api/health | ConvertTo-Json -Depth 4
 
-# URL analysis (requires trained URL model)
 Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/api/analyze/url `
   -ContentType 'application/json' `
   -Body '{"url":"https://example.com/"}' | ConvertTo-Json -Depth 8
 
-# Message analysis (requires trained message model)
 Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/api/analyze/message `
   -ContentType 'application/json' `
   -Body '{"content":"URGENT: verify your account now or it will be suspended."}' | ConvertTo-Json -Depth 8
@@ -555,14 +656,14 @@ Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/api/analyze/message `
 
 ## Limitations
 
-1. **No model calibration**: Risk scores are derived from uncalibrated `predict_proba` outputs. The 0-100 score is a relative indicator, not a real-world probability.
-2. **Dataset staleness**: Both datasets are static snapshots. Phishing campaigns evolve; accuracy on current threats is unknown.
-3. **Email-only message model**: The Kaggle dataset contains email bodies. Performance on SMS, chat, or other short-form messages has not been evaluated.
-4. **No page-content analysis**: URL assessment uses only URL-string features. No JavaScript execution, no screenshot, no certificate inspection.
-5. **No DNS or WHOIS checks**: Domain age, registration details, and DNS resolution are not used.
-6. **Single-fold evaluation**: Metrics are from one 80/20 stratified group split. They reflect training-set performance and are not field accuracy guarantees.
-7. **Language**: Both models were trained primarily on English-language content. Multilingual performance is untested.
-8. **No real-time blocklist**: The application does not query any threat intelligence feed or blocklist.
+1. **The URL dataset's legitimate class is homepages only.** Every legitimate PhiUSIIL example is `https://www.<domain>`. The shipped model therefore scores only the hostname and ignores paths and scheme. It still over-scores legitimate sites on non-`www` subdomains (`accounts.google.com` scores 99, `en.wikipedia.org` 79). Phishing signals in the path, such as `/login/verify`, appear only as heuristic indicators.
+2. **Moderate URL performance.** On held-out domains: accuracy 0.82, precision 0.87, **recall 0.63**. About a third of phishing hostnames in the test set were missed.
+3. **The message model is untrained here.** Until you train it on the Kaggle data, message scans return 503. Once trained, it covers English email bodies only. **SMS classification has not been validated.**
+4. **No calibration.** Risk scores come from uncalibrated `predict_proba` outputs; treat the 0–100 score as relative, not as a probability.
+5. **One holdout split.** Metrics come from one domain- or near-duplicate-grouped 80/20 split, not cross-validation. They describe held-out performance on these datasets, not field accuracy.
+6. **Static, dated datasets.** Phishing campaigns change; accuracy on current threats is unknown.
+7. **No page, DNS, WHOIS, certificate or blocklist checks.** Nothing is fetched or resolved.
+8. **Explanations describe the model, not the truth.** A large contribution shows what drove the score, including dataset artifacts.
 
 ---
 
@@ -600,4 +701,4 @@ Then open `http://127.0.0.1:5173` in your browser.
 
 > The backend must be started **before** opening the frontend if you want the API status indicator to show as online on first load.
 >
-> Both models must be trained (see [Model Training](#model-training)) before the URL scanner or message scanner will return results. Until then, scan requests return HTTP 503 with guidance.
+> Each scanner returns results only after its model is trained (see [Model Training](#model-training)). Until then, that scanner shows an "unavailable" banner and its requests return HTTP 503 with guidance. The sidebar shows READY / UNAVAILABLE per model.
