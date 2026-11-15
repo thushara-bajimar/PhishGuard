@@ -6,17 +6,19 @@ import argparse
 import csv
 import hashlib
 import json
+import re
 import sys
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 
 import joblib
 import numpy as np
 import sklearn
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import confusion_matrix, f1_score, precision_score, recall_score
+from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, precision_score, recall_score
 from sklearn.model_selection import StratifiedGroupKFold
 from sklearn.pipeline import Pipeline
 
@@ -24,53 +26,119 @@ DEFAULT_MODEL_PATH = Path(__file__).resolve().parents[2] / "models" / "message_p
 DATASET_SOURCE = "Kaggle: Phishing Email Detection by subhajournal, Phishing_Email.csv"
 DATASET_SOURCE_URL = "https://www.kaggle.com/datasets/subhajournal/phishingemails"
 FEATURE_SCHEMA_VERSION = 1
+MAX_TEXT_LENGTH = 100_000
+# Placeholder strings some public CSV exports use for an absent message body.
+MISSING_TEXT_MARKERS = frozenset({"empty", "nan", "none", "null"})
+
+_NEAR_DUPLICATE_URL = re.compile(r"(?i)\b(?:https?://|www\.)\S+")
+_NEAR_DUPLICATE_DIGITS = re.compile(r"\d+")
+_NEAR_DUPLICATE_NON_WORD = re.compile(r"[^\w]+")
 
 
 def _normalize_text(text: str) -> str:
     return " ".join(text.casefold().split())
 
 
-def _read_dataset(csv_path: Path, text_column: str, label_column: str, phishing_label: str):
+def _near_duplicate_key(text: str) -> str:
+    """Group key that collapses templated variants (different links, numbers or punctuation)."""
+    value = _NEAR_DUPLICATE_URL.sub(" url ", text.casefold())
+    value = _NEAR_DUPLICATE_DIGITS.sub("0", value)
+    value = " ".join(_NEAR_DUPLICATE_NON_WORD.sub(" ", value).split())
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _read_dataset(
+    csv_path: Path, text_column: str, label_column: str, phishing_label: str
+) -> tuple[list[str], list[int], list[str], dict[str, Any]]:
+    """Load labeled messages, skipping unusable rows and reporting each filtering decision.
+
+    Skipped rows: wrong field count, empty/placeholder text ("empty", "nan", ...), missing label,
+    or text over 100,000 characters. Exact duplicates (after case/whitespace normalization) keep
+    the first copy; texts that appear with conflicting labels are dropped entirely. Remaining
+    messages are grouped by a near-duplicate key so templated variants stay in one split side.
+    """
     if not csv_path.is_file():
         raise FileNotFoundError(f"Dataset CSV not found: {csv_path}")
+    # Email bodies can exceed the csv module's 128 KiB default field limit.
+    csv.field_size_limit(max(csv.field_size_limit(), 16 * 1024 * 1024))
+
+    skipped: Counter[str] = Counter()
     texts: list[str] = []
-    labels: list[int] = []
-    groups: list[str] = []
-    raw_labels: set[str] = set()
-    seen_text: dict[str, str] = {}
-    duplicates_removed = 0
+    raw_label_values: list[str] = []
+    exact_keys: list[str] = []
+    rows_read = 0
 
     with csv_path.open("r", encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
         if not reader.fieldnames or text_column not in reader.fieldnames or label_column not in reader.fieldnames:
             raise ValueError(f"CSV must contain columns {text_column!r} and {label_column!r}; found {reader.fieldnames!r}.")
-        for row_number, row in enumerate(reader, start=2):
-            text = (row.get(text_column) or "").strip()
-            label = (row.get(label_column) or "").strip()
-            if not text or not label:
-                raise ValueError(f"CSV row {row_number} has empty message text or label.")
-            if len(text) > 100_000:
-                raise ValueError(f"CSV row {row_number} text exceeds 100,000 characters.")
-            raw_labels.add(label)
-            normalized = _normalize_text(text)
-            digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
-            if digest in seen_text:
-                if seen_text[digest] != label:
-                    raise ValueError(f"CSV row {row_number} has a conflicting label for duplicate normalized text.")
-                duplicates_removed += 1
+        for row in reader:
+            rows_read += 1
+            if None in row or row.get(text_column) is None or row.get(label_column) is None:
+                skipped["malformed_row"] += 1
                 continue
-            seen_text[digest] = label
+            text = row[text_column].strip()
+            label = row[label_column].strip()
+            if not text or text.casefold() in MISSING_TEXT_MARKERS:
+                skipped["missing_text"] += 1
+                continue
+            if not label:
+                skipped["missing_label"] += 1
+                continue
+            if len(text) > MAX_TEXT_LENGTH:
+                skipped["text_too_long"] += 1
+                continue
             texts.append(text)
-            labels.append(1 if label == phishing_label else 0)
-            groups.append(digest)
+            raw_label_values.append(label)
+            exact_keys.append(hashlib.sha256(_normalize_text(text).encode("utf-8")).hexdigest())
 
+    raw_labels = set(raw_label_values)
     if len(raw_labels) != 2:
-        raise ValueError(f"Expected exactly 2 distinct labels, found {sorted(raw_labels)!r}.")
+        raise ValueError(f"Expected exactly 2 distinct labels among valid rows, found {sorted(raw_labels)!r}.")
     if phishing_label not in raw_labels:
         raise ValueError(f"Phishing label {phishing_label!r} is not present in the dataset labels {sorted(raw_labels)!r}.")
+
+    label_sets: dict[str, set[str]] = {}
+    for key, label in zip(exact_keys, raw_label_values, strict=True):
+        label_sets.setdefault(key, set()).add(label)
+    kept_texts: list[str] = []
+    labels: list[int] = []
+    seen: set[str] = set()
+    duplicates = conflicts = 0
+    for text, label, key in zip(texts, raw_label_values, exact_keys, strict=True):
+        if len(label_sets[key]) > 1:
+            conflicts += 1
+        elif key in seen:
+            duplicates += 1
+        else:
+            seen.add(key)
+            kept_texts.append(text)
+            labels.append(1 if label == phishing_label else 0)
     if len(set(labels)) != 2:
-        raise ValueError("Both phishing and legitimate examples must remain after duplicate removal.")
-    return texts, labels, groups, {"unique_rows": len(texts), "duplicate_rows_removed": duplicates_removed}
+        raise ValueError("Both phishing and legitimate examples must remain after filtering.")
+
+    groups = [_near_duplicate_key(text) for text in kept_texts]
+    report: dict[str, Any] = {
+        "rows_read": rows_read,
+        "rows_skipped": dict(sorted(skipped.items())),
+        "rows_skipped_total": sum(skipped.values()),
+        "duplicate_rows_removed": duplicates,
+        "conflicting_label_rows_dropped": conflicts,
+        "unique_rows": len(kept_texts),
+        "near_duplicate_groups": len(set(groups)),
+        "class_counts": {"legitimate": labels.count(0), "phishing": labels.count(1)},
+    }
+    return kept_texts, labels, groups, report
+
+
+def _top_terms(pipeline: Pipeline, count: int = 20) -> dict[str, list[dict[str, float]]]:
+    names = pipeline.named_steps["tfidf"].get_feature_names_out()
+    coefficients = pipeline.named_steps["classifier"].coef_[0]
+    order = np.argsort(coefficients)
+    return {
+        "toward_phishing": [{"term": str(names[i]), "coefficient": round(float(coefficients[i]), 4)} for i in order[::-1][:count]],
+        "toward_legitimate": [{"term": str(names[i]), "coefficient": round(float(coefficients[i]), 4)} for i in order[:count]],
+    }
 
 
 def train_model(
@@ -81,9 +149,9 @@ def train_model(
     phishing_label: str,
     random_state: int = 42,
 ) -> dict[str, object]:
-    texts, labels, groups, dataset_counts = _read_dataset(csv_path, text_column, label_column, phishing_label)
+    texts, labels, groups, dataset_report = _read_dataset(csv_path, text_column, label_column, phishing_label)
     if len(set(groups)) < 5 or min(sum(labels), len(labels) - sum(labels)) < 2:
-        raise ValueError("At least 5 unique messages and at least 2 examples from each class are required for a grouped 5-fold split.")
+        raise ValueError("At least 5 near-duplicate groups and at least 2 examples from each class are required for a grouped 5-fold split.")
 
     splitter = StratifiedGroupKFold(n_splits=5, shuffle=True, random_state=random_state)
     train_indices, test_indices = next(splitter.split(texts, labels, groups))
@@ -131,17 +199,21 @@ def train_model(
         "feature_schema_version": FEATURE_SCHEMA_VERSION,
         "sklearn_version": sklearn.__version__,
         "trained_at_utc": datetime.now(timezone.utc).isoformat(),
-        "rows": dataset_counts,
+        "rows": dataset_report,
+        "split": "StratifiedGroupKFold(n_splits=5) first fold, grouped by near-duplicate text key (80/20 holdout)",
         "train_rows": len(train_indices),
         "test_rows": len(test_indices),
         "train_groups": len({groups[index] for index in train_indices}),
         "test_groups": len({groups[index] for index in test_indices}),
         "group_overlap": len({groups[index] for index in train_indices} & {groups[index] for index in test_indices}),
+        "vocabulary_size": len(pipeline.named_steps["tfidf"].vocabulary_),
+        "accuracy": float(accuracy_score(y_test, predicted)),
         "precision_phishing": float(precision_score(y_test, predicted, pos_label=1, zero_division=0)),
         "recall_phishing": float(recall_score(y_test, predicted, pos_label=1, zero_division=0)),
         "f1_phishing": float(f1_score(y_test, predicted, pos_label=1, zero_division=0)),
         "confusion_matrix_labels": ["legitimate", "phishing"],
         "confusion_matrix": matrix,
+        "top_terms": _top_terms(pipeline),
     }
 
     model_path.parent.mkdir(parents=True, exist_ok=True)

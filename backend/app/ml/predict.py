@@ -13,10 +13,9 @@ import joblib
 import numpy as np
 from sklearn.pipeline import Pipeline
 
-from app.ml.url_features import extract_heuristic_indicators
+from app.ml.url_features import FEATURE_SCHEMA_VERSION, extract_heuristic_indicators
 
 DEFAULT_MODEL_PATH = Path(__file__).resolve().parents[2] / "models" / "url_phishing_model.joblib"
-FEATURE_SCHEMA_VERSION = 2
 MODEL_NAME = "PhishGuard URL Random Forest"
 DISCLAIMER = (
     "This automated assessment is informational and may be wrong. A low score or 'no phishing detected' "

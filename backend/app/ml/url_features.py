@@ -12,6 +12,9 @@ import tldextract
 
 _DOMAIN_EXTRACTOR = tldextract.TLDExtract(cache_dir=False, suffix_list_urls=())
 
+# 3: pipeline gained the URLScopeTransformer input-scope step ahead of the 23 features.
+FEATURE_SCHEMA_VERSION = 3
+
 FEATURE_NAMES = (
     "url_length",
     "hostname_length",
@@ -182,3 +185,72 @@ class URLFeatureTransformer(TransformerMixin, BaseEstimator):
     def get_feature_names_out(self, input_features: Any = None) -> np.ndarray:
         del input_features
         return np.asarray(FEATURE_NAMES, dtype=object)
+
+
+INPUT_SCOPES = ("url", "hostname", "registered_domain")
+
+FEATURE_LABELS = {
+    "url_length": "Input length",
+    "hostname_length": "Hostname length",
+    "hostname_dot_count": "Dots in hostname",
+    "subdomain_count": "Subdomain labels",
+    "path_length": "Path length",
+    "path_segment_count": "Path segments",
+    "query_length": "Query length",
+    "query_parameter_count": "Query parameters",
+    "fragment_present": "Fragment present",
+    "https_present": "HTTPS scheme",
+    "ip_address_host": "IP address host",
+    "host_has_punycode": "Punycode hostname",
+    "suspicious_character_count": "Unusual punctuation",
+    "at_sign_count": "At-sign count",
+    "hyphen_count": "Hyphens",
+    "host_hyphen_count": "Hyphens in hostname",
+    "digit_count": "Digits",
+    "digit_ratio": "Digit ratio",
+    "host_digit_ratio": "Digit ratio in hostname",
+    "suspicious_keyword_count": "Sensitive-action keywords",
+    "shortener_host": "URL-shortener host",
+    "nonstandard_port": "Non-standard port",
+    "userinfo_present": "User-info syntax",
+}
+
+
+def scope_url(url: str, scope: str) -> str:
+    """Reduce a URL to the part the model is allowed to see.
+
+    PhiUSIIL's legitimate URLs are all ``https://www.<domain>`` homepages, so scheme, path and
+    the ``www.`` label are label shortcuts in that dataset. ``hostname`` drops scheme, port,
+    path, query and a leading ``www.``; ``registered_domain`` keeps only the domain under the
+    public suffix (or the IP address).
+    """
+    if scope == "url":
+        return url
+    if scope not in INPUT_SCOPES:
+        raise ValueError(f"Unknown URL input scope {scope!r}; expected one of {INPUT_SCOPES}.")
+    host = (_split_url(url).hostname or "").rstrip(".").lower()
+    if host.startswith("www."):
+        host = host[4:]
+    if scope == "registered_domain":
+        try:
+            ipaddress.ip_address(host.strip("[]"))
+            return host
+        except ValueError:
+            return _DOMAIN_EXTRACTOR(host).top_domain_under_public_suffix or host
+    return host
+
+
+class URLScopeTransformer(TransformerMixin, BaseEstimator):
+    """Pipeline step applying :func:`scope_url` so training and inference see identical input."""
+
+    def __init__(self, scope: str = "hostname") -> None:
+        self.scope = scope
+
+    def fit(self, X: Iterable[str], y: Any = None) -> URLScopeTransformer:
+        del X, y
+        if self.scope not in INPUT_SCOPES:
+            raise ValueError(f"Unknown URL input scope {self.scope!r}; expected one of {INPUT_SCOPES}.")
+        return self
+
+    def transform(self, X: Iterable[str]) -> list[str]:
+        return [scope_url(str(value), self.scope) for value in X]

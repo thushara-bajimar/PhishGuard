@@ -6,6 +6,11 @@ from pathlib import Path
 from app.ml.message_predict import MessagePredictionService, extract_message_indicators
 from app.ml.message_train import train_model
 
+FIXTURE_WORDS = (
+    "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike "
+    "november oscar papa quebec romeo sierra tango uniform victor whiskey xray yankee"
+).split()
+
 
 def test_message_indicators_are_heuristics_not_model_attributions() -> None:
     text = "URGENT: verify your password now or your account will be suspended. Pay the processing fee at https://example.test/claim"
@@ -27,9 +32,10 @@ def test_training_saves_and_loads_a_fitted_pipeline(tmp_path: Path) -> None:
     with dataset_path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=["Email Text", "Email Type"])
         writer.writeheader()
-        for index in range(25):
-            writer.writerow({"Email Text": f"urgent verify password account secure login notice sample {index}", "Email Type": "Phishing Email"})
-            writer.writerow({"Email Text": f"team lunch meeting schedule project discussion sample {index}", "Email Type": "Safe Email"})
+        # Distinct words (not just numbers) so near-duplicate grouping keeps rows in separate groups.
+        for word in FIXTURE_WORDS:
+            writer.writerow({"Email Text": f"urgent verify password account secure login notice {word}", "Email Type": "Phishing Email"})
+            writer.writerow({"Email Text": f"team lunch meeting schedule project discussion {word}", "Email Type": "Safe Email"})
 
     metrics = train_model(dataset_path, model_path, "Email Text", "Email Type", "Phishing Email", random_state=11)
 
